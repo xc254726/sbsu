@@ -273,7 +273,7 @@ fun HomePage(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                if (BuildConfig.IS_PR_BUILD || uiState.systemStatus.isPrBuild) {
+                if (false) {
                     WarningCard(
                         message = stringResource(
                             id = R.string.home_pr_build_warning,

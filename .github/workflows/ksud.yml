@@ -23,6 +23,7 @@ on:
         default: true
 env:
   CARGO_TERM_COLOR: always
+  KSU_PACKAGE_NAME: com.sb.manager
 jobs:
   build:
     name: Build ksud (${{ inputs.target }})

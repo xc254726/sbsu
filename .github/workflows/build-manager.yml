@@ -195,6 +195,13 @@ jobs:
           name: "Manager-mappings"
           path: "manager/app/build/outputs/mapping/release/"
           if-no-files-found: ignore
+      - name: Upload stub
+        if: matrix.build_type == 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Stub-release
+          path: manager/stub/build/outputs/apk/release/*.apk
+          if-no-files-found: ignore
 
   repack-manager:
     if: always() && needs.build-manager.result == 'success' && needs.build-ksud.result == 'success'
@@ -239,6 +246,12 @@ jobs:
         with:
           name: ksud-riscv64-linux-android
           path: artifacts/ksud-riscv64-linux-android
+      - name: Download stub
+        if: matrix.build_type == 'release'
+        uses: actions/download-artifact@v8
+        with:
+          name: Stub-release
+          path: artifacts/Stub-release
 
 
       - name: Place manager apk and ksud artifacts
@@ -305,6 +318,10 @@ jobs:
             -P "$SIGN_KEYSTORE_PASSWORD" \
             -S "$SIGN_KEY_PASSWORD" \
             --strip
+
+      - name: Add stub to dist
+        if: matrix.build_type == 'release'
+        run: find artifacts/Stub-release -name "*.apk" -exec cp -f {} dist/ \;
 
       - name: Delete gradle build
         uses: GeekyEggo/delete-artifact@v6

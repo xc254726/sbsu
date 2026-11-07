@@ -85,8 +85,7 @@ class TriggerService : Service() {
         }
         TriggerEngine.log(this, "监听 $dev")
 
-        var cnt = 0
-        var lastMs = 0L
+        var downAt = 0L
 
         while (alive.get()) {
             val cfg = TriggerEngine.load(this)
@@ -102,15 +101,17 @@ class TriggerService : Service() {
                 val reader = BufferedReader(InputStreamReader(p.inputStream))
                 var line = reader.readLine()
                 while (line != null && alive.get()) {
-                    if (line.contains("KEY_VOLUMEUP") && line.contains("DOWN")) {
-                        val now = System.currentTimeMillis()
-                        val window = (cfg.intervalSec.coerceAtLeast(1)) * 1000L
-                        cnt = if (cnt > 0 && now - lastMs <= window) cnt + 1 else 1
-                        lastMs = now
-                        TriggerEngine.log(this, "音量+ ×$cnt")
-                        if (cnt >= cfg.pressCount.coerceAtLeast(1)) {
-                            cnt = 0
-                            onTriggered(cfg)
+                    val t = line.trimEnd()
+                    if (t.contains("KEY_VOLUMEUP") && t.endsWith("DOWN")) {
+                        downAt = System.currentTimeMillis()
+                        TriggerEngine.log(this, "音量+ 按下")
+                    } else if (t.contains("KEY_VOLUMEUP") && t.endsWith("UP")) {
+                        if (downAt > 0L) {
+                            val held = System.currentTimeMillis() - downAt
+                            downAt = 0L
+                            val need = cfg.holdSeconds.coerceAtLeast(1) * 1000L
+                            TriggerEngine.log(this, "松开，按住 ${held}ms（需要 ${need}ms）")
+                            if (held >= need) onTriggered(cfg)
                         }
                     }
                     line = reader.readLine()
@@ -165,7 +166,7 @@ class TriggerService : Service() {
                 }
             }
 
-            repeat(cfg.pressCount) { runRoot("input keyevent 25") }
+            runRoot("input keyevent 25")
             updateNotification("已触发 · 前台 ${fg.substringAfterLast('.')}")
         } catch (e: Exception) {
             TriggerEngine.log(this, "触发异常: ${e.message}")

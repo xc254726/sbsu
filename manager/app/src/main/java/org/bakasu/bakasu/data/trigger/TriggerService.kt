@@ -165,7 +165,7 @@ class TriggerService : Service() {
                     runRoot("input keyevent 66")
                 }
             }
-            updateNotification("已执行 · $pkgShort(cfg.appPkg)")
+            updateNotification("已执行 · ${pkgShort(cfg.appPkg)}")
         } catch (e: Exception) {
             TriggerEngine.log(this, "触发异常: ${e.message}")
         }

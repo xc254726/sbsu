@@ -24,14 +24,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -160,13 +158,6 @@ class MainActivity : ComponentActivity() {
                         else -> {
                             val ctx = this@MainActivity
                             var gate by remember { mutableStateOf(GateState.CHECKING) }
-                            var noticeText by remember { mutableStateOf<String?>(null) }
-
-                            LaunchedEffect(gate) {
-                                if (gate == GateState.OK) {
-                                    noticeText = License.fetchNotice(ctx)
-                                }
-                            }
 
                             LaunchedEffect(Unit) {
                                 gate = if (License.hasKey(ctx)) {
@@ -192,16 +183,6 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            noticeText?.let { txt ->
-                                AlertDialog(
-                                    onDismissRequest = { noticeText = null },
-                                    title = { Text("公告") },
-                                    text = { Text(txt) },
-                                    confirmButton = {
-                                        TextButton(onClick = { noticeText = null }) { Text("我知道了") }
-                                    },
-                                )
-                            }
                         }
                     }
                 }
@@ -355,18 +336,6 @@ object License {
         if (resp.optBoolean("ok")) VerifyResult.VALID else VerifyResult.INVALID
     }
 
-    /** 拉取公告，没有则返回 null */
-    suspend fun fetchNotice(context: Context): String? = withContext(Dispatchers.IO) {
-        val key = storedKey(context) ?: return@withContext null
-        val body = JSONObject().apply {
-            put("key", key)
-            put("device", deviceCode(context))
-        }
-        val resp = post("/notice/get", body) ?: return@withContext null
-        if (!resp.optBoolean("ok")) return@withContext null
-        val text = resp.optString("text", "")
-        if (text.isBlank()) null else text
-    }
 }
 
 @Composable

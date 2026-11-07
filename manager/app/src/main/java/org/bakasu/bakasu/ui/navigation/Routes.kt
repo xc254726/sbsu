@@ -161,10 +161,6 @@ sealed interface Route :
 
     @Parcelize
     @Serializable
-    data object HideMask : Route
-
-    @Parcelize
-    @Serializable
     data object UmountManager : Route
 
     @Parcelize

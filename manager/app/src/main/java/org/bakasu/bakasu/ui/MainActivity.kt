@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,13 +37,16 @@ import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import java.io.BufferedReader
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 import java.util.Locale
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.domain.model.StartupState
 import org.bakasu.bakasu.domain.usecase.ApplyLanguageUseCase
 import org.bakasu.bakasu.domain.usecase.EnsureManagerInstalledUseCase
@@ -55,6 +60,7 @@ import org.bakasu.bakasu.ui.viewmodel.ModuleViewModel
 import org.bakasu.bakasu.ui.viewmodel.SettingsUiAction
 import org.bakasu.bakasu.ui.viewmodel.SettingsUiEvent
 import org.bakasu.bakasu.ui.viewmodel.SettingsViewModel
+import org.json.JSONObject
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
@@ -80,7 +86,6 @@ class MainActivity : ComponentActivity() {
         try {
             val splashScreen = installSplashScreen()
 
-            // Enable edge to edge
             enableEdgeToEdge()
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -97,7 +102,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Keep the home state active even when an incoming intent opens another screen.
             lifecycleScope.launch {
                 homeViewModel.uiState.first { it.isInitialDataLoaded }
             }
@@ -123,7 +127,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Initialize app state once.
             if (!isInitialized) {
                 initializeData()
                 isInitialized = true
@@ -136,16 +139,31 @@ class MainActivity : ComponentActivity() {
                     when (val state = startupState.collectAsStateWithLifecycle().value) {
                         is StartupState.Failed -> StartupFailureContent(state.message)
                         else -> {
-                            var activated by remember {
-                                mutableStateOf(Activation.isActivated(this@MainActivity))
+                            val ctx = this@MainActivity
+                            var gate by remember { mutableStateOf(GateState.CHECKING) }
+
+                            LaunchedEffect(Unit) {
+                                gate = if (License.hasKey(ctx)) {
+                                    val r = License.verify(ctx)
+                                    if (r == VerifyResult.VALID || r == VerifyResult.NETWORK_ERROR) {
+                                        GateState.OK
+                                    } else {
+                                        GateState.NEED_ACTIVATION
+                                    }
+                                } else {
+                                    GateState.NEED_ACTIVATION
+                                }
                             }
-                            if (activated) {
-                                NavContainer(settingsViewModel, intentChannel)
-                            } else {
-                                ActivationScreen(
-                                    deviceCode = Activation.deviceCode(this@MainActivity),
-                                    onCheck = { input -> Activation.activate(this@MainActivity, input) },
-                                    onActivated = { activated = true },
+
+                            when (gate) {
+                                GateState.OK -> NavContainer(settingsViewModel, intentChannel)
+                                GateState.CHECKING -> LoadingScreen()
+                                GateState.NEED_ACTIVATION -> ActivationScreen(
+                                    deviceCode = License.deviceCode(ctx),
+                                    onActivate = { input -> License.activate(ctx, input) },
+                                    onDone = {
+                                        gate = GateState.OK
+                                    },
                                 )
                             }
                         }
@@ -172,7 +190,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Initialize theme settings.
         themeUtils.initializeThemeSettings(settingsViewModel)
     }
 
@@ -203,7 +220,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
+@androidx.compose.runtime.Composable
 private fun StartupFailureContent(reason: String) {
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -216,18 +233,24 @@ private fun StartupFailureContent(reason: String) {
     }
 }
 
+enum class GateState { CHECKING, OK, NEED_ACTIVATION }
+
+enum class VerifyResult { VALID, INVALID, NETWORK_ERROR }
+
 /**
- * 离线一机一码激活
+ * 在线卡密校验
  *
- * 设备码 = SHA-256(SECRET | ANDROID_ID | SALT) 前 6 字节，格式 XXXX-XXXX-XXXX
- * 卡密   = HMAC-SHA256(SECRET, 设备码) 取前 16 字符（Base32 字符集），格式 SB-XXXX-XXXX-XXXX-XXXX
+ * 服务端：Cloudflare Worker（online-key/worker.js）
+ *    POST /activate {key, device}   首次激活（绑定设备）
+ *    POST /verify   {key, device}   每次启动校验
+ *
+ * deviceCode：SHA-256(SALT | ANDROID_ID) 前 6 字节，格式 XXXX-XXXX-XXXX
  */
-object Activation {
-    private const val SECRET = "3a8c0a51cd1e6459f68503d77452588c9b85fe96bf217f9e541df6527e61e491"
+object License {
+    private const val BASE_URL = "https://sbkey.dpdns.org"
     private const val SALT = "sb-manager-v1"
     private const val PREFS = "sb_activation"
-    private const val KEY_CODE = "code"
-    private const val ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    private const val KEY = "license_key"
 
     private fun androidId(context: Context): String =
         android.provider.Settings.Secure.getString(
@@ -237,51 +260,89 @@ object Activation {
 
     fun deviceCode(context: Context): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        val bytes = digest.digest("$SECRET|${androidId(context)}|$SALT".toByteArray())
+        val bytes = digest.digest("$SALT|${androidId(context)}".toByteArray())
         val hex = buildString {
             for (i in 0 until 6) append(String.format(Locale.US, "%02X", bytes[i].toInt() and 0xFF))
         }
         return hex.chunked(4).joinToString("-")
     }
 
-    fun expectedKey(context: Context): String {
-        val code = deviceCode(context).replace("-", "")
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(SECRET.toByteArray(), "HmacSHA256"))
-        val out = mac.doFinal(code.toByteArray())
-        val sb = StringBuilder()
-        for (i in 0 until 16) {
-            sb.append(ALPHABET[(out[i].toInt() and 0xFF) % ALPHABET.length])
+    fun storedKey(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
+
+    fun hasKey(context: Context): Boolean = !storedKey(context).isNullOrBlank()
+
+    private fun post(path: String, body: JSONObject): JSONObject? = try {
+        val conn = URL(BASE_URL + path).openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.connectTimeout = 8000
+        conn.readTimeout = 8000
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        conn.outputStream.use { it.write(body.toString().toByteArray()) }
+        val code = conn.responseCode
+        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+        val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+        conn.disconnect()
+        if (text.isBlank()) null else JSONObject(text)
+    } catch (e: Exception) {
+        null
+    }
+
+    suspend fun activate(context: Context, input: String): String? = withContext(Dispatchers.IO) {
+        val key = input.uppercase(Locale.US).filter { it.isLetterOrDigit() || it == '-' }
+        if (key.length < 8) return@withContext "卡密格式不对"
+
+        val body = JSONObject().apply {
+            put("key", key)
+            put("device", deviceCode(context))
         }
-        return "SB-" + sb.toString().chunked(4).joinToString("-")
+        val resp = post("/activate", body) ?: return@withContext "网络连接失败，请检查网络"
+
+        if (resp.optBoolean("ok")) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(KEY, key).apply()
+            null
+        } else {
+            resp.optString("err", "激活失败")
+        }
     }
 
-    fun isActivated(context: Context): Boolean {
-        val saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_CODE, null) ?: return false
-        return saved == expectedKey(context)
+    suspend fun verify(context: Context): VerifyResult = withContext(Dispatchers.IO) {
+        val key = storedKey(context) ?: return@withContext VerifyResult.INVALID
+        val body = JSONObject().apply {
+            put("key", key)
+            put("device", deviceCode(context))
+        }
+        val resp = post("/verify", body) ?: return@withContext VerifyResult.NETWORK_ERROR
+        if (resp.optBoolean("ok")) VerifyResult.VALID else VerifyResult.INVALID
     }
+}
 
-    fun activate(context: Context, input: String): Boolean {
-        val want = expectedKey(context)
-        if (normalize(input) != normalize(want)) return false
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(KEY_CODE, want).apply()
-        return true
+@Composable
+private fun LoadingScreen() {
+    Surface(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            CircularProgressIndicator()
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("正在校验授权…", style = MaterialTheme.typography.bodyMedium)
+        }
     }
-
-    private fun normalize(s: String): String =
-        s.uppercase(Locale.US).filter { it.isLetterOrDigit() }
 }
 
 @Composable
 private fun ActivationScreen(
     deviceCode: String,
-    onCheck: (String) -> Boolean,
-    onActivated: () -> Unit,
+    onActivate: suspend (String) -> String?,
+    onDone: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
 
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -298,10 +359,7 @@ private fun ActivationScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            Text(
-                text = "设备码",
-                style = MaterialTheme.typography.labelLarge,
-            )
+            Text(text = "设备码", style = MaterialTheme.typography.labelLarge)
             Text(
                 text = deviceCode,
                 style = MaterialTheme.typography.headlineSmall,
@@ -337,16 +395,19 @@ private fun ActivationScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
+                enabled = !busy,
                 onClick = {
-                    if (onCheck(input)) {
-                        onActivated()
-                    } else {
-                        error = "卡密无效"
+                    busy = true
+                    error = null
+                    kotlinx.coroutines.MainScope().launch {
+                        val err = onActivate(input)
+                        busy = false
+                        if (err == null) onDone() else error = err
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("激活")
+                Text(if (busy) "激活中…" else "激活")
             }
 
             Spacer(modifier = Modifier.height(16.dp))

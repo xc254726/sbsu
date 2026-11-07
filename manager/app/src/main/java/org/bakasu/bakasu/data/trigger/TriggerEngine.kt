@@ -14,14 +14,14 @@ object TriggerEngine {
     private const val PREFS = "sb_auto_trigger"
     private const val K_ENABLED = "enabled"
     private const val K_PKG = "pkg"
-    private const val K_HOLD = "hold"
+    private const val K_WAIT = "wait"
     private const val K_SCRIPT = "script"
     private const val K_INPUT = "input"
 
     data class Config(
         val enabled: Boolean = false,
         val appPkg: String = "",
-        val holdSeconds: Int = 2,
+        val waitSeconds: Int = 3,
         val scriptPath: String = "/data/VT内核.sh",
         val inputText: String = "",
     )
@@ -31,7 +31,7 @@ object TriggerEngine {
         return Config(
             enabled = p.getBoolean(K_ENABLED, false),
             appPkg = p.getString(K_PKG, "") ?: "",
-            holdSeconds = p.getInt(K_HOLD, 2),
+            waitSeconds = p.getInt(K_WAIT, 3),
             scriptPath = p.getString(K_SCRIPT, "/data/VT内核.sh") ?: "",
             inputText = p.getString(K_INPUT, "") ?: "",
         )
@@ -41,7 +41,7 @@ object TriggerEngine {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(K_ENABLED, cfg.enabled)
             .putString(K_PKG, cfg.appPkg)
-            .putInt(K_HOLD, cfg.holdSeconds)
+            .putInt(K_WAIT, cfg.waitSeconds)
             .putString(K_SCRIPT, cfg.scriptPath)
             .putString(K_INPUT, cfg.inputText)
             .apply()
@@ -66,7 +66,7 @@ object TriggerEngine {
         val f = logFile(ctx)
         if (!f.exists()) return "（暂无日志）"
         return try {
-            f.readLines().takeLast(120).joinToString("\n").ifBlank { "（暂无日志）" }
+            f.readLines().takeLast(150).joinToString("\n").ifBlank { "（暂无日志）" }
         } catch (e: Exception) {
             "（读取失败：${e.message}）"
         }

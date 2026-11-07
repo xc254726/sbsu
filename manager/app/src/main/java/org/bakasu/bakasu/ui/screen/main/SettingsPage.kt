@@ -44,6 +44,7 @@ import androidx.compose.material.icons.twotone.RestartAlt
 import androidx.compose.material.icons.twotone.Save
 import androidx.compose.material.icons.twotone.Science
 import androidx.compose.material.icons.twotone.Security
+import androidx.compose.material.icons.twotone.Terminal
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Update
@@ -478,6 +479,16 @@ fun SettingsPage(bottomPadding: Dp) {
                                 title = stringResource(R.string.send_log),
                                 onClick = {
                                     showBottomsheet = true
+                                },
+                            )
+                        }
+                        item {
+                            SettingsJumpPageWidget(
+                                icon = Icons.TwoTone.Terminal,
+                                title = "终端",
+                                description = "以 root 身份执行命令",
+                                onClick = {
+                                    navigator.push(Route.Terminal)
                                 },
                             )
                         }

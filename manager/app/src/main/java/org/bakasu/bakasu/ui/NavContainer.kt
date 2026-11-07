@@ -87,6 +87,7 @@ import org.bakasu.bakasu.ui.screen.ScriptRunScreen
 import org.bakasu.bakasu.ui.screen.SulogScreen
 import org.bakasu.bakasu.ui.screen.TemplateEditorScreen
 import org.bakasu.bakasu.ui.screen.UmountManagerScreen
+import org.bakasu.bakasu.ui.screen.terminal.TerminalScreen
 import org.bakasu.bakasu.ui.screen.about.AboutScreen
 import org.bakasu.bakasu.ui.screen.about.OpenSourceLicenseScreen
 import org.bakasu.bakasu.ui.screen.kernelFlash.KernelFlashScreen
@@ -544,6 +545,18 @@ fun NavContainer(
                     MainScreen(pagerInterceptionMode = settings.pagerInterceptionMode)
                 }
             }
+            entry<Route.Terminal>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    TerminalScreen()
+                }
+            }
+
             entry<Route.ThemeSettings>(swipeDismiss = swipeBackDirection) {
                 ManagerNavEntry(
                     interceptPredictiveBack = interceptPredictiveBack,

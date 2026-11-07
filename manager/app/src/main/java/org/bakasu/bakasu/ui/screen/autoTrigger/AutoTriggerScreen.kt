@@ -1,9 +1,5 @@
 package org.bakasu.bakasu.ui.screen.autoTrigger
 
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -15,8 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -31,7 +25,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,10 +37,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.data.trigger.TriggerEngine
+import org.bakasu.bakasu.data.trigger.TriggerService
 import org.bakasu.bakasu.ui.navigation.LocalNavigator
 
 @Composable
@@ -57,16 +52,11 @@ fun AutoTriggerScreen() {
     val scope = rememberCoroutineScope()
 
     var cfg by remember { mutableStateOf(TriggerEngine.load(ctx)) }
-    var running by remember { mutableStateOf(false) }
+    var running by remember { mutableStateOf(TriggerService.running) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    var pickerOpen by remember { mutableStateOf(false) }
     var logOpen by remember { mutableStateOf(false) }
     var logText by remember { mutableStateOf("") }
-
-    LaunchedEffect(Unit) {
-        running = withContext(Dispatchers.IO) { TriggerEngine.isRunning() }
-    }
 
     Column(
         modifier = Modifier
@@ -75,14 +65,12 @@ fun AutoTriggerScreen() {
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // 顶栏
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { navigator.pop() }) { Text("‹ 返回") }
             Spacer(Modifier.width(8.dp))
             Text("自动触发", style = MaterialTheme.typography.titleLarge)
         }
 
-        // 状态
         Section("状态") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -90,11 +78,11 @@ fun AutoTriggerScreen() {
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = if (running) "运行中" else "未启用",
+                        text = if (running) "监听中" else "未启用",
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     Text(
-                        text = "只在目标应用前台时触发",
+                        text = "后台服务自动监听音量键",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -106,35 +94,25 @@ fun AutoTriggerScreen() {
             }
         }
 
-        // 触发条件
         Section("触发条件") {
-            Row(
+            OutlinedTextField(
+                value = cfg.appPkg,
+                onValueChange = { cfg = cfg.copy(appPkg = it.trim()) },
+                label = { Text("目标应用包名（留空=任意应用）") },
+                placeholder = { Text("com.tencent.tmgp.codev") },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("目标应用", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        text = if (cfg.appPkg.isBlank()) {
-                            "未选择"
-                        } else {
-                            "${cfg.appLabel.ifBlank { cfg.appPkg }}\n${cfg.appPkg}"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                OutlinedButton(onClick = { pickerOpen = true }) { Text("更换") }
-            }
+                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            )
 
             Spacer(Modifier.height(10.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("连点次数（音量上键）", modifier = Modifier.weight(1f))
+                Text("音量上键连点次数", modifier = Modifier.weight(1f))
                 OutlinedTextField(
                     value = cfg.pressCount.toString(),
                     onValueChange = { v ->
-                        val n = v.filter { it.isDigit() }.take(1).toIntOrNull() ?: 0
+                        val n = v.filter { it.isDigit() }.take(1).toIntOrNull() ?: 1
                         cfg = cfg.copy(pressCount = n.coerceIn(1, 9))
                     },
                     singleLine = true,
@@ -150,8 +128,8 @@ fun AutoTriggerScreen() {
                 OutlinedTextField(
                     value = cfg.intervalSec.toString(),
                     onValueChange = { v ->
-                        val n = v.filter { it.isDigit() }.take(1).toIntOrNull() ?: 0
-                        cfg = cfg.copy(intervalSec = n.coerceIn(0, 9))
+                        val n = v.filter { it.isDigit() }.take(1).toIntOrNull() ?: 1
+                        cfg = cfg.copy(intervalSec = n.coerceIn(1, 9))
                     },
                     singleLine = true,
                     modifier = Modifier.width(90.dp),
@@ -160,7 +138,6 @@ fun AutoTriggerScreen() {
             }
         }
 
-        // 执行动作
         Section("执行动作") {
             OutlinedTextField(
                 value = cfg.scriptPath,
@@ -191,29 +168,40 @@ fun AutoTriggerScreen() {
         }
 
         message?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
         }
 
         Button(
             enabled = !busy,
             onClick = {
-                if (cfg.appPkg.isBlank()) {
-                    message = "请先选择目标应用"
-                } else {
-                    busy = true
-                    message = null
-                    scope.launch {
-                        val err = withContext(Dispatchers.IO) {
-                            TriggerEngine.save(ctx, cfg)
-                            TriggerEngine.apply(ctx, cfg)
+                busy = true
+                message = null
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        TriggerEngine.save(ctx, cfg)
+                        if (cfg.enabled) {
+                            TriggerService.start(ctx)
+                        } else {
+                            TriggerService.stop(ctx)
                         }
-                        running = withContext(Dispatchers.IO) { TriggerEngine.isRunning() }
-                        busy = false
-                        message = err ?: if (cfg.enabled) "已保存，守护运行中" else "已保存，守护已停止"
+                    }
+                    kotlinx.coroutines.delay(1200)
+                    running = TriggerService.running
+                    busy = false
+                    message = if (cfg.enabled) {
+                        if (running) "已启用，后台监听中" else "启动失败，请看日志"
+                    } else {
+                        "已停止"
                     }
                 }
             },
@@ -232,12 +220,22 @@ fun AutoTriggerScreen() {
                 message = null
                 scope.launch {
                     val r = withContext(Dispatchers.IO) {
-                        TriggerEngine.save(ctx, cfg)
-                        TriggerEngine.apply(ctx, cfg.copy(enabled = false))
-                        TriggerEngine.testNow(cfg)
+                        val sb = StringBuilder()
+                        if (cfg.scriptPath.isNotBlank()) {
+                            val out = Shell.cmd("sh '${cfg.scriptPath}' < /dev/null 2>&1").exec()
+                            sb.append(out.out.joinToString("\n"))
+                        }
+                        cfg.inputText.lines().forEach { raw ->
+                            val line = raw.trim()
+                            if (line.isNotEmpty()) {
+                                Shell.cmd("input text '${line.replace(" ", "%s")}'").exec()
+                                Shell.cmd("input keyevent 66").exec()
+                            }
+                        }
+                        sb.toString().ifBlank { "已执行（无输出）" }
                     }
                     busy = false
-                    message = "测试输出：$r"
+                    message = "测试结果：$r"
                 }
             },
             modifier = Modifier
@@ -248,59 +246,36 @@ fun AutoTriggerScreen() {
             Text("立即测试一次")
         }
 
-        TextButton(
-            onClick = {
-                scope.launch {
-                    logText = withContext(Dispatchers.IO) { TriggerEngine.readLog() }
-                    logOpen = true
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("查看运行日志")
+        Row(modifier = Modifier.fillMaxWidth()) {
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        logText = withContext(Dispatchers.IO) { TriggerEngine.readLog(ctx) }
+                        logOpen = true
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("查看运行日志")
+            }
+            TextButton(
+                onClick = {
+                    TriggerEngine.clearLog(ctx)
+                    message = "日志已清空"
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("清空日志")
+            }
         }
 
         Text(
-            text = "说明：音量键连点会顺带改变系统音量，触发后会自动按回去；" +
-                "脚本和输入内容都以 root 身份执行。",
+            text = "说明：音量键会顺带改变系统音量，触发后会自动按回去；脚本和输入以 root 执行。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Spacer(Modifier.height(24.dp))
-    }
-
-    if (pickerOpen) {
-        val apps = remember(pickerOpen) { loadLaunchableApps(ctx) }
-        AlertDialog(
-            onDismissRequest = { pickerOpen = false },
-            title = { Text("选择目标应用") },
-            text = {
-                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                    items(apps) { item ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    cfg = cfg.copy(appPkg = item.first, appLabel = item.second)
-                                    pickerOpen = false
-                                }
-                                .padding(vertical = 10.dp),
-                        ) {
-                            Text(item.second, style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                item.first,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { pickerOpen = false }) { Text("取消") }
-            },
-        )
     }
 
     if (logOpen) {
@@ -313,11 +288,7 @@ fun AutoTriggerScreen() {
                         .heightIn(max = 420.dp)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    Text(
-                        text = logText,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
+                    Text(text = logText, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
             },
             confirmButton = {
@@ -344,15 +315,4 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
             Column(modifier = Modifier.padding(16.dp), content = content)
         }
     }
-}
-
-private fun loadLaunchableApps(ctx: Context): List<Pair<String, String>> {
-    val pm = ctx.packageManager
-    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-    @Suppress("DEPRECATION")
-    val list = pm.queryIntentActivities(intent, 0)
-    return list
-        .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
-        .distinctBy { it.first }
-        .sortedBy { it.second.lowercase() }
 }

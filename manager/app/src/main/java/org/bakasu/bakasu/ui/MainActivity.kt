@@ -8,19 +8,27 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,10 +38,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -43,10 +58,12 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.bakasu.bakasu.R
 import org.bakasu.bakasu.domain.model.StartupState
 import org.bakasu.bakasu.domain.usecase.ApplyLanguageUseCase
 import org.bakasu.bakasu.domain.usecase.EnsureManagerInstalledUseCase
@@ -159,11 +176,10 @@ class MainActivity : ComponentActivity() {
                                 GateState.OK -> NavContainer(settingsViewModel, intentChannel)
                                 GateState.CHECKING -> LoadingScreen()
                                 GateState.NEED_ACTIVATION -> ActivationScreen(
-                                    deviceCode = License.deviceCode(ctx),
-                                    onActivate = { input -> License.activate(ctx, input) },
-                                    onDone = {
-                                        gate = GateState.OK
+                                    onActivate = { input, remember ->
+                                        License.activate(ctx, input, remember)
                                     },
+                                    onDone = { gate = GateState.OK },
                                 )
                             }
                         }
@@ -240,11 +256,9 @@ enum class VerifyResult { VALID, INVALID, NETWORK_ERROR }
 /**
  * 在线卡密校验
  *
- * 服务端：Cloudflare Worker（online-key/worker.js）
- *    POST /activate {key, device}   首次激活（绑定设备）
- *    POST /verify   {key, device}   每次启动校验
- *
- * deviceCode：SHA-256(SALT | ANDROID_ID) 前 6 字节，格式 XXXX-XXXX-XXXX
+ * 服务端：https://sbkey.dpdns.org (Cloudflare Worker + KV)
+ *    POST /activate {key, device}
+ *    POST /verify   {key, device}
  */
 object License {
     private const val BASE_URL = "https://sbkey.dpdns.org"
@@ -282,31 +296,34 @@ object License {
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
         val code = conn.responseCode
         val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+        val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         conn.disconnect()
         if (text.isBlank()) null else JSONObject(text)
     } catch (e: Exception) {
         null
     }
 
-    suspend fun activate(context: Context, input: String): String? = withContext(Dispatchers.IO) {
-        val key = input.uppercase(Locale.US).filter { it.isLetterOrDigit() || it == '-' }
-        if (key.length < 8) return@withContext "卡密格式不对"
+    suspend fun activate(context: Context, input: String, remember: Boolean): String? =
+        withContext(Dispatchers.IO) {
+            val key = input.uppercase(Locale.US).filter { it.isLetterOrDigit() || it == '-' }
+            if (key.length < 8) return@withContext "卡密格式不对"
 
-        val body = JSONObject().apply {
-            put("key", key)
-            put("device", deviceCode(context))
-        }
-        val resp = post("/activate", body) ?: return@withContext "网络连接失败，请检查网络"
+            val body = JSONObject().apply {
+                put("key", key)
+                put("device", deviceCode(context))
+            }
+            val resp = post("/activate", body) ?: return@withContext "网络连接失败，请检查网络"
 
-        if (resp.optBoolean("ok")) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString(KEY, key).apply()
-            null
-        } else {
-            resp.optString("err", "激活失败")
+            if (resp.optBoolean("ok")) {
+                if (remember) {
+                    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit().putString(KEY, key).apply()
+                }
+                null
+            } else {
+                resp.optString("err", "激活失败")
+            }
         }
-    }
 
     suspend fun verify(context: Context): VerifyResult = withContext(Dispatchers.IO) {
         val key = storedKey(context) ?: return@withContext VerifyResult.INVALID
@@ -321,100 +338,156 @@ object License {
 
 @Composable
 private fun LoadingScreen() {
-    Surface(modifier = Modifier.fillMaxSize()) {
+    Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF7F7F8)) {
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            CircularProgressIndicator()
+            CircularProgressIndicator(color = Color(0xFF2A2A2A))
             Spacer(modifier = Modifier.height(16.dp))
-            Text("正在校验授权…", style = MaterialTheme.typography.bodyMedium)
+            Text("正在校验授权…", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF8A8A8F))
         }
     }
 }
 
 @Composable
 private fun ActivationScreen(
-    deviceCode: String,
-    onActivate: suspend (String) -> String?,
+    onActivate: suspend (String, Boolean) -> String?,
     onDone: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var rememberKey by remember { mutableStateOf(true) }
 
-    Surface(modifier = Modifier.fillMaxSize()) {
+    val ink = Color(0xFF1F1F1F)
+    val grey = Color(0xFF8A8A8F)
+
+    Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF7F7F8)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(28.dp),
+                .padding(horizontal = 26.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // 圆形头像（应用图标）
+            Image(
+                painter = painterResource(id = R.drawable.app_icon_photo),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(96.dp)
+                    .clip(CircleShape),
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             Text(
-                text = "请激活后使用",
-                style = MaterialTheme.typography.headlineMedium,
+                text = "sb",
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Medium,
+                color = ink,
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            Text(text = "设备码", style = MaterialTheme.typography.labelLarge)
             Text(
-                text = deviceCode,
-                style = MaterialTheme.typography.headlineSmall,
-                fontFamily = FontFamily.Monospace,
-                textAlign = TextAlign.Center,
+                text = "请输入卡密以继续使用",
+                fontSize = 13.sp,
+                color = grey,
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(34.dp))
 
-            OutlinedTextField(
-                value = input,
-                onValueChange = {
-                    input = it
-                    error = null
-                },
-                label = { Text("卡密") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                ),
-            )
-
-            if (error != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = error.orEmpty(),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                enabled = !busy,
-                onClick = {
-                    busy = true
-                    error = null
-                    kotlinx.coroutines.MainScope().launch {
-                        val err = onActivate(input)
-                        busy = false
-                        if (err == null) onDone() else error = err
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
+            // 白色卡片
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(6.dp, RoundedCornerShape(26.dp))
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Color.White)
+                    .padding(22.dp),
             ) {
-                Text(if (busy) "激活中…" else "激活")
+                Text(text = "卡密", fontSize = 12.sp, color = grey)
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = {
+                        input = it
+                        error = null
+                    },
+                    singleLine = true,
+                    placeholder = { Text("输入卡密", color = Color(0xFFBDBDC4), fontSize = 14.sp) },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                    ),
+                )
+
+                if (error != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = error.orEmpty(),
+                        color = Color(0xFFD33A3A),
+                        fontSize = 12.sp,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(text = "记住此卡密", fontSize = 13.sp, color = grey)
+                    Switch(
+                        checked = rememberKey,
+                        onCheckedChange = { rememberKey = it },
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Button(
+                    enabled = !busy,
+                    onClick = {
+                        busy = true
+                        error = null
+                        MainScope().launch {
+                            val err = onActivate(input, rememberKey)
+                            busy = false
+                            if (err == null) onDone() else error = err
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ink,
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Text(
+                        text = if (busy) "验证中…" else "验证并进入",
+                        fontSize = 15.sp,
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(26.dp))
 
             Text(
-                text = "把设备码发给卖家换取卡密",
-                style = MaterialTheme.typography.bodySmall,
+                text = "联网验证",
+                fontSize = 11.sp,
+                color = Color(0xFFAFAFB6),
                 textAlign = TextAlign.Center,
             )
         }

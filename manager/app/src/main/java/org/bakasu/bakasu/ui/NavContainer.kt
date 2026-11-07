@@ -87,7 +87,6 @@ import org.bakasu.bakasu.ui.screen.ScriptRunScreen
 import org.bakasu.bakasu.ui.screen.SulogScreen
 import org.bakasu.bakasu.ui.screen.TemplateEditorScreen
 import org.bakasu.bakasu.ui.screen.UmountManagerScreen
-import org.bakasu.bakasu.ui.screen.autoTrigger.AutoTriggerScreen
 import org.bakasu.bakasu.ui.screen.about.AboutScreen
 import org.bakasu.bakasu.ui.screen.about.OpenSourceLicenseScreen
 import org.bakasu.bakasu.ui.screen.kernelFlash.KernelFlashScreen
@@ -557,17 +556,6 @@ fun NavContainer(
                 }
             }
 
-            entry<Route.AutoTrigger>(swipeDismiss = swipeBackDirection) {
-                ManagerNavEntry(
-                    interceptPredictiveBack = interceptPredictiveBack,
-                    onBack = onBack,
-                    themeConfig = themeConfig,
-                    backgroundRenderState = backgroundRenderState,
-                    useBlur = useBlur,
-                ) {
-                    AutoTriggerScreen()
-                }
-            }
             entry<Route.SuSFSConfig>(swipeDismiss = swipeBackDirection) {
                 ManagerNavEntry(
                     interceptPredictiveBack = interceptPredictiveBack,

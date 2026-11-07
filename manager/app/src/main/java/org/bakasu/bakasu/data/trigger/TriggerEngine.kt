@@ -14,16 +14,14 @@ object TriggerEngine {
     private const val PREFS = "sb_auto_trigger"
     private const val K_ENABLED = "enabled"
     private const val K_PKG = "pkg"
-    private const val K_PRESS = "press"
-    private const val K_INTERVAL = "interval"
+    private const val K_HOLD = "hold"
     private const val K_SCRIPT = "script"
     private const val K_INPUT = "input"
 
     data class Config(
         val enabled: Boolean = false,
         val appPkg: String = "",
-        val pressCount: Int = 2,
-        val intervalSec: Int = 1,
+        val holdSeconds: Int = 2,
         val scriptPath: String = "/data/VT内核.sh",
         val inputText: String = "",
     )
@@ -33,8 +31,7 @@ object TriggerEngine {
         return Config(
             enabled = p.getBoolean(K_ENABLED, false),
             appPkg = p.getString(K_PKG, "") ?: "",
-            pressCount = p.getInt(K_PRESS, 2),
-            intervalSec = p.getInt(K_INTERVAL, 1),
+            holdSeconds = p.getInt(K_HOLD, 2),
             scriptPath = p.getString(K_SCRIPT, "/data/VT内核.sh") ?: "",
             inputText = p.getString(K_INPUT, "") ?: "",
         )
@@ -44,8 +41,7 @@ object TriggerEngine {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(K_ENABLED, cfg.enabled)
             .putString(K_PKG, cfg.appPkg)
-            .putInt(K_PRESS, cfg.pressCount)
-            .putInt(K_INTERVAL, cfg.intervalSec)
+            .putInt(K_HOLD, cfg.holdSeconds)
             .putString(K_SCRIPT, cfg.scriptPath)
             .putString(K_INPUT, cfg.inputText)
             .apply()

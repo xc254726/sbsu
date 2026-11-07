@@ -23,4 +23,3 @@ rootProject.name = "BakaSU"
 include(":app")
 include(":baselineprofile")
 include(":lint-rules")
-include(":stub")

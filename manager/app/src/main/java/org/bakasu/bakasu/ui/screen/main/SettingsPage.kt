@@ -44,7 +44,6 @@ import androidx.compose.material.icons.twotone.RestartAlt
 import androidx.compose.material.icons.twotone.Save
 import androidx.compose.material.icons.twotone.Science
 import androidx.compose.material.icons.twotone.Security
-import androidx.compose.material.icons.twotone.VisibilityOff
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Update
@@ -479,16 +478,6 @@ fun SettingsPage(bottomPadding: Dp) {
                                 title = stringResource(R.string.send_log),
                                 onClick = {
                                     showBottomsheet = true
-                                },
-                            )
-                        }
-                        item {
-                            SettingsJumpPageWidget(
-                                icon = Icons.TwoTone.VisibilityOff,
-                                title = "隐藏面具",
-                                description = "隐藏后桌面找不到，拨号密令恢复",
-                                onClick = {
-                                    navigator.push(Route.HideMask)
                                 },
                             )
                         }

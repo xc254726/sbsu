@@ -82,7 +82,7 @@ fun AutoTriggerScreen() {
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     Text(
-                        text = "后台服务自动监听音量键",
+                        text = "后台服务自动检测前台应用",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -107,12 +107,12 @@ fun AutoTriggerScreen() {
 
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("长按秒数（音量上键）", modifier = Modifier.weight(1f))
+                Text("进入应用后等待（秒）", modifier = Modifier.weight(1f))
                 OutlinedTextField(
-                    value = cfg.holdSeconds.toString(),
+                    value = cfg.waitSeconds.toString(),
                     onValueChange = { v ->
                         val n = v.filter { it.isDigit() }.take(2).toIntOrNull() ?: 1
-                        cfg = cfg.copy(holdSeconds = n.coerceIn(1, 30))
+                        cfg = cfg.copy(waitSeconds = n.coerceIn(1, 30))
                     },
                     singleLine = true,
                     modifier = Modifier.width(90.dp),
@@ -253,7 +253,7 @@ fun AutoTriggerScreen() {
         }
 
         Text(
-            text = "说明：音量键会顺带改变系统音量，触发后会自动按回去；脚本和输入以 root 执行。",
+            text = "说明：进入指定应用后开始计时，满 N 秒自动执行一次；离开应用后重新计时。脚本和输入以 root 执行。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

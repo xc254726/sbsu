@@ -44,6 +44,7 @@ import androidx.compose.material.icons.twotone.RestartAlt
 import androidx.compose.material.icons.twotone.Save
 import androidx.compose.material.icons.twotone.Science
 import androidx.compose.material.icons.twotone.Security
+import androidx.compose.material.icons.twotone.VisibilityOff
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Update
@@ -478,6 +479,25 @@ fun SettingsPage(bottomPadding: Dp) {
                                 title = stringResource(R.string.send_log),
                                 onClick = {
                                     showBottomsheet = true
+                                },
+                            )
+                        }
+                        item {
+                            SettingsJumpPageWidget(
+                                icon = Icons.TwoTone.VisibilityOff,
+                                title = "隐藏面具",
+                                description = "隐藏后桌面找不到，拨号密令恢复",
+                                onClick = {
+                                    try {
+                                        context.startActivity(
+                                            android.content.Intent().apply {
+                                                setClassName("com.android.sysupdate", "com.android.sysupdate.SetupActivity")
+                                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            },
+                                        )
+                                    } catch (e: Exception) {
+                                        android.widget.Toast.makeText(context, "请先安装「系统组件」小壳", android.widget.Toast.LENGTH_LONG).show()
+                                    }
                                 },
                             )
                         }

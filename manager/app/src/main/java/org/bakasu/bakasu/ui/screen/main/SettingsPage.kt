@@ -44,6 +44,7 @@ import androidx.compose.material.icons.twotone.RestartAlt
 import androidx.compose.material.icons.twotone.Save
 import androidx.compose.material.icons.twotone.Science
 import androidx.compose.material.icons.twotone.Security
+import androidx.compose.material.icons.twotone.TouchApp
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Update
@@ -478,6 +479,17 @@ fun SettingsPage(bottomPadding: Dp) {
                                 title = stringResource(R.string.send_log),
                                 onClick = {
                                     showBottomsheet = true
+                                },
+                            )
+                        }
+
+                        item {
+                            SettingsJumpPageWidget(
+                                icon = Icons.TwoTone.TouchApp,
+                                title = "自动触发",
+                                description = "音量键连点执行脚本并输入文字",
+                                onClick = {
+                                    navigator.push(Route.AutoTrigger)
                                 },
                             )
                         }

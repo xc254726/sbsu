@@ -18,6 +18,7 @@ object TriggerEngine {
     private const val INPUT_FILE = "/data/adb/sb_input.txt"
     private const val STATE_CNT = "/data/adb/sb_trigger.cnt"
     private const val STATE_LAST = "/data/adb/sb_trigger.last"
+    private const val PID_FILE = "/data/adb/sb_trigger.pid"
     private const val DAEMON = "/data/adb/service.d/sb_trigger.sh"
     const val LOG_FILE = "/data/adb/sb_trigger.log"
 
@@ -118,23 +119,32 @@ object TriggerEngine {
             stop()
             return null
         }
-        return if (start()) null else "启动守护失败"
+        if (start()) return null
+        val tail = readLog().take(300)
+        return "启动守护失败\n$tail"
     }
 
     fun start(): Boolean {
-        sh("pkill -f sb_trigger.sh 2>/dev/null; true")
-        sh("nohup sh $DAEMON >/dev/null 2>&1 < /dev/null &")
-        Thread.sleep(900)
+        stop()
+        sh("setsid sh $DAEMON >/dev/null 2>&1 < /dev/null &")
+        Thread.sleep(1500)
+        if (isRunning()) return true
+        Thread.sleep(1200)
         return isRunning()
     }
 
     fun stop() {
-        sh("pkill -f sb_trigger.sh 2>/dev/null; true")
+        sh("if [ -f $PID_FILE ]; then kill \$(cat $PID_FILE) 2>/dev/null; rm -f $PID_FILE; fi; pkill -f sb_trigger.sh 2>/dev/null; true")
     }
 
     fun isRunning(): Boolean {
-        val r = sh("ps -A -o PID,ARGS 2>/dev/null | grep '[s]b_trigger.sh' | wc -l")
-        return r.code == 0 && (out(r).toIntOrNull() ?: 0) > 0
+        val r = sh(
+            "if [ -f $PID_FILE ]; then p=\$(cat $PID_FILE); " +
+                "if [ -d /proc/\$p ]; then echo yes; else echo no; fi; else echo no; fi",
+        )
+        if (out(r).trim() == "yes") return true
+        val r2 = sh("ps -A -o PID,ARGS 2>/dev/null | grep '[s]b_trigger.sh' | wc -l")
+        return (out(r2).trim().toIntOrNull() ?: 0) > 0
     }
 
     fun readLog(): String {
@@ -169,11 +179,14 @@ object TriggerEngine {
         |CNT=/data/adb/sb_trigger.cnt
         |LAST=/data/adb/sb_trigger.last
         |LOG=/data/adb/sb_trigger.log
+        |PID=/data/adb/sb_trigger.pid
         |
-        |[ -f "@CONF" ] || exit 0
+        |echo "[@(date '+%m-%d %H:%M:%S')] launching" >> "@LOG"
+        |[ -f "@CONF" ] || { echo "no conf, exit" >> "@LOG"; exit 0; }
         |. "@CONF"
+        |echo @@ > "@PID"
         |
-        |echo "[@(date '+%m-%d %H:%M:%S')] daemon start APP=@APP PRESS=@PRESS INTERVAL=@INTERVAL" >> "@LOG"
+        |echo "[@(date '+%m-%d %H:%M:%S')] daemon start pid=@@ APP=@APP PRESS=@PRESS INTERVAL=@INTERVAL" >> "@LOG"
         |
         |DEV=""
         |for d in /dev/input/event*; do

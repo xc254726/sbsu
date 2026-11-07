@@ -7,23 +7,20 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
-        <!-- 没有 LAUNCHER 入口，所以桌面和抽屉里不会出现 -->
         <activity
             android:name=".SetupActivity"
             android:exported="true"
             android:excludeFromRecents="true"
             android:noHistory="true" />
 
-        <!-- 拨号密令 *#*#8899#*#* -->
+        <!-- 抓所有拨号密令，实际密令由 /data/local/tmp/sb_hide_code 决定 -->
         <receiver
             android:name=".SecretReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.provider.Telephony.SECRET_CODE" />
 
-                <data
-                    android:host="8899"
-                    android:scheme="android_secret_code" />
+                <data android:scheme="android_secret_code" />
             </intent-filter>
         </receiver>
     </application>

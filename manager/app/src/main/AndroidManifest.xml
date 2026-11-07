@@ -177,14 +177,6 @@
                 <action android:name="org.bakasu.bakasu.magica.LAUNCH" />
             </intent-filter>
         </receiver>
-            <service
-            android:name=".data.trigger.TriggerService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="volume key trigger" />
-        </service>
 </application>
 
 </manifest>

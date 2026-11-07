@@ -106,30 +106,13 @@ fun AutoTriggerScreen() {
             )
 
             Spacer(Modifier.height(10.dp))
-
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("音量上键连点次数", modifier = Modifier.weight(1f))
+                Text("长按秒数（音量上键）", modifier = Modifier.weight(1f))
                 OutlinedTextField(
-                    value = cfg.pressCount.toString(),
+                    value = cfg.holdSeconds.toString(),
                     onValueChange = { v ->
-                        val n = v.filter { it.isDigit() }.take(1).toIntOrNull() ?: 1
-                        cfg = cfg.copy(pressCount = n.coerceIn(1, 9))
-                    },
-                    singleLine = true,
-                    modifier = Modifier.width(90.dp),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("连点间隔（秒）", modifier = Modifier.weight(1f))
-                OutlinedTextField(
-                    value = cfg.intervalSec.toString(),
-                    onValueChange = { v ->
-                        val n = v.filter { it.isDigit() }.take(1).toIntOrNull() ?: 1
-                        cfg = cfg.copy(intervalSec = n.coerceIn(1, 9))
+                        val n = v.filter { it.isDigit() }.take(2).toIntOrNull() ?: 1
+                        cfg = cfg.copy(holdSeconds = n.coerceIn(1, 30))
                     },
                     singleLine = true,
                     modifier = Modifier.width(90.dp),

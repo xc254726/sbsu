@@ -169,10 +169,6 @@ sealed interface Route :
 
     @Parcelize
     @Serializable
-    data object AutoTrigger : Route
-
-    @Parcelize
-    @Serializable
     data class KernelFlash(
         val kernelUri: String,
         val selectedSlot: String?,

@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
 /**
  * 自动触发后台服务
  *
- * 用 root 跑 getevent 实时读音量键，符合条件时执行脚本并输入文字。
+ * 逻辑：指定应用进入前台并持续 N 秒 → 执行脚本 → 输入文字
  */
 class TriggerService : Service() {
 
@@ -45,7 +45,10 @@ class TriggerService : Service() {
 
     private val alive = AtomicBoolean(false)
     private var worker: Thread? = null
-    private var eventProc: Process? = null
+    private var watcher: Process? = null
+
+    private var enterAt = 0L
+    private var fired = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -55,7 +58,7 @@ class TriggerService : Service() {
         running = true
         alive.set(true)
         TriggerEngine.log(this, "服务启动")
-        worker = thread(name = "sb-trigger", isDaemon = true) { listenLoop() }
+        worker = thread(name = "sb-trigger", isDaemon = true) { monitorLoop() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -67,7 +70,7 @@ class TriggerService : Service() {
         alive.set(false)
         running = false
         try {
-            eventProc?.destroy()
+            watcher?.destroy()
         } catch (_: Exception) {
         }
         TriggerEngine.log(this, "服务停止")
@@ -76,88 +79,85 @@ class TriggerService : Service() {
 
     /* ---------------- 主循环 ---------------- */
 
-    private fun listenLoop() {
-        val dev = findVolumeDevice()
-        if (dev == null) {
-            TriggerEngine.log(this, "找不到音量键设备，退出")
-            updateNotification("找不到音量设备")
-            return
-        }
-        TriggerEngine.log(this, "监听 $dev")
-
-        var downAt = 0L
-
+    private fun monitorLoop() {
         while (alive.get()) {
-            val cfg = TriggerEngine.load(this)
-            val p = startGetEvent(dev)
+            val p = startWatcher()
             if (p == null) {
-                TriggerEngine.log(this, "getevent 启动失败")
+                TriggerEngine.log(this, "前台监听启动失败")
                 Thread.sleep(2000)
                 continue
             }
-            eventProc = p
-            TriggerEngine.log(this, "getevent 已连接")
+            watcher = p
+            TriggerEngine.log(this, "开始监听前台应用")
             try {
                 val reader = BufferedReader(InputStreamReader(p.inputStream))
                 var line = reader.readLine()
                 while (line != null && alive.get()) {
-                    val t = line.trimEnd()
-                    if (t.contains("KEY_VOLUMEUP") && t.endsWith("DOWN")) {
-                        downAt = System.currentTimeMillis()
-                        TriggerEngine.log(this, "音量+ 按下")
-                    } else if (t.contains("KEY_VOLUMEUP") && t.endsWith("UP")) {
-                        if (downAt > 0L) {
-                            val held = System.currentTimeMillis() - downAt
-                            downAt = 0L
-                            val need = cfg.holdSeconds.coerceAtLeast(1) * 1000L
-                            TriggerEngine.log(this, "松开，按住 ${held}ms（需要 ${need}ms）")
-                            if (held >= need) onTriggered(cfg)
-                        }
-                    }
+                    val pkg = Regex("u0 ([A-Za-z0-9_.]+)/").find(line)?.groupValues?.get(1)
+                    if (!pkg.isNullOrBlank()) handleForeground(pkg)
                     line = reader.readLine()
                 }
             } catch (e: Exception) {
-                TriggerEngine.log(this, "读取事件异常: ${e.message}")
+                TriggerEngine.log(this, "监听异常: ${e.message}")
             } finally {
                 try {
                     p.destroy()
                 } catch (_: Exception) {
                 }
             }
-            if (alive.get()) Thread.sleep(800)
+            if (alive.get()) Thread.sleep(1000)
         }
     }
 
-    private fun findVolumeDevice(): String? {
-        val r = runRoot("for d in /dev/input/event*; do getevent -lp \$d 2>/dev/null | grep -q KEY_VOLUMEUP && echo \$d && break; done")
-        return r.trim().lines().firstOrNull { it.startsWith("/dev/input/") }
-    }
-
-    private fun startGetEvent(dev: String): Process? = try {
-        val b = ProcessBuilder("su", "-c", "getevent -l -q $dev")
+    private fun startWatcher(): Process? = try {
+        val b = ProcessBuilder(
+            "su", "-c",
+            "while true; do dumpsys window 2>/dev/null | grep -m1 mCurrentFocus; sleep 1; done",
+        )
         b.redirectErrorStream(true)
         b.start()
     } catch (e: Exception) {
-        TriggerEngine.log(this, "启动 getevent 失败: ${e.message}")
+        TriggerEngine.log(this, "启动失败: ${e.message}")
         null
+    }
+
+    private fun handleForeground(pkg: String) {
+        val cfg = TriggerEngine.load(this)
+        val target = cfg.appPkg
+        if (target.isBlank()) return
+
+        val now = System.currentTimeMillis()
+        if (!pkg.equals(target, ignoreCase = true)) {
+            if (enterAt != 0L) {
+                TriggerEngine.log(this, "离开 $pkg")
+            }
+            enterAt = 0L
+            fired = false
+            return
+        }
+
+        if (enterAt == 0L) {
+            enterAt = now
+            fired = false
+            TriggerEngine.log(this, "进入 $pkg，等待 ${cfg.waitSeconds} 秒")
+            return
+        }
+
+        if (!fired && now - enterAt >= cfg.waitSeconds.coerceAtLeast(1) * 1000L) {
+            fired = true
+            TriggerEngine.log(this, "已等待 ${(now - enterAt) / 1000} 秒，执行脚本")
+            onTriggered(cfg)
+        }
     }
 
     /* ---------------- 触发动作 ---------------- */
 
     private fun onTriggered(cfg: TriggerEngine.Config) {
         try {
-            val fg = foregroundPackage()
-            TriggerEngine.log(this, "触发！前台=$fg 目标=${cfg.appPkg.ifBlank { "(未限制)" }}")
-            if (cfg.appPkg.isNotBlank() && !fg.equals(cfg.appPkg, ignoreCase = true)) {
-                TriggerEngine.log(this, "前台不匹配，跳过")
-                return
-            }
-
             if (cfg.scriptPath.isNotBlank()) {
                 val out = runRoot("sh '${cfg.scriptPath.replace("'", "'\\''")}' < /dev/null 2>&1")
-                TriggerEngine.log(this, "脚本输出: ${out.take(300)}")
+                TriggerEngine.log(this, "脚本输出: ${out.take(400)}")
             }
-
             cfg.inputText.lines().forEach { raw ->
                 val line = raw.trim()
                 if (line.isNotEmpty()) {
@@ -165,22 +165,13 @@ class TriggerService : Service() {
                     runRoot("input keyevent 66")
                 }
             }
-
-            runRoot("input keyevent 25")
-            updateNotification("已触发 · 前台 ${fg.substringAfterLast('.')}")
+            updateNotification("已执行 · $pkgShort(cfg.appPkg)")
         } catch (e: Exception) {
             TriggerEngine.log(this, "触发异常: ${e.message}")
         }
     }
 
-    private fun foregroundPackage(): String {
-        val r = runRoot("dumpsys window 2>/dev/null | grep -m1 mCurrentFocus")
-        val m = Regex("u0 ([A-Za-z0-9_.]+)/").find(r)
-        if (m != null) return m.groupValues[1]
-        val r2 = runRoot("dumpsys activity activities 2>/dev/null | grep -m1 -E 'topResumedActivity|mResumedActivity'")
-        val m2 = Regex("u0 ([A-Za-z0-9_.]+)/").find(r2)
-        return m2?.groupValues?.get(1) ?: ""
-    }
+    private fun pkgShort(p: String): String = p.substringAfterLast('.')
 
     private fun runRoot(cmd: String): String = try {
         val r = Shell.cmd(cmd).exec()

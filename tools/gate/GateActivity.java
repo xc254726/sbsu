@@ -10,7 +10,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
-import android.graphics.RectF;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -231,7 +231,7 @@ public class GateActivity extends Activity {
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         c.drawCircle(size / 2f, size / 2f, size / 2f, p);
         p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
-        c.drawBitmap(src, new RectF(0, 0, size, size), new RectF(0, 0, size, size), p);
+        c.drawBitmap(src, new Rect(0, 0, size, size), new Rect(0, 0, size, size), p);
         return out;
     }
 

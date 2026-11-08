@@ -86,7 +86,12 @@ public class GateActivity extends Activity {
         // 圆形头像
         ImageView avatar = new ImageView(this);
         try {
-            Bitmap src = ((BitmapDrawable) getPackageManager().getApplicationIcon(getPackageName())).getBitmap();
+            android.graphics.drawable.Drawable drawable = getPackageManager().getApplicationIcon(getPackageName());
+            int px = dp(96);
+            Bitmap src = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
+            Canvas iconCanvas = new Canvas(src);
+            drawable.setBounds(0, 0, px, px);
+            drawable.draw(iconCanvas);
             avatar.setImageBitmap(circleCrop(src));
         } catch (Exception e) {
             avatar.setBackground(circleDrawable(INK, dp(96)));

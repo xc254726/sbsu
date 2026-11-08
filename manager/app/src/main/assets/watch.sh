@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # =====================================================================
-#  sb 隐藏与呼出：特定应用内音量键手势拉起管理器
+#  sb 隐藏与呼出：特定应用内「音量键手势」拉起管理器
 #  用法:
 #    watch.sh <包名逗号列表> <long|click> <连点次数> <窗口ms> <长按ms> <工作目录> <组件名>
 #  行为:
@@ -33,7 +33,7 @@ if [ -f "$PIDFILE" ]; then
 	_old=$(cat "$PIDFILE" 2>/dev/null)
 	# 只认"确实是本脚本"的进程：pid 会被系统复用，光看 kill -0 会误判
 	if [ -n "$_old" ] && [ -r "/proc/$_old/cmdline" ] && \
-		tr '\0' ' ' < "/proc/$_old/cmdline" 2>/dev/null | grep -q "watch.sh"; then
+		tr '\0' ' ' < "/proc/$_old/cmdline" 2>/dev/null | grep -q "sb/watch.sh"; then
 		echo "已有一个实例在运行 (pid=$_old)，退出"
 		exit 0
 	fi
@@ -126,12 +126,12 @@ fire() {
 			# 已经装着就不要再装：否则系统每次弹"正在更新"，还会闪一下新旧状态
 			if ! pm list packages 2>/dev/null | grep -q "^package:$_pkg$"; then
 				if [ -f "$APK" ]; then
-					mkdir -p /data/local/tmp/sad 2>/dev/null
-					cp -f "$APK" /data/local/tmp/sad/sad.apk 2>/dev/null
-					chmod 644 /data/local/tmp/sad/sad.apk 2>/dev/null
+					mkdir -p /data/local/tmp/sb 2>/dev/null
+					cp -f "$APK" /data/local/tmp/sb/sb.apk 2>/dev/null
+					chmod 644 /data/local/tmp/sb/sb.apk 2>/dev/null
 					log "安装中…"
 					echo 1 > "$WORK/self_install" 2>/dev/null
-					pm install -r /data/local/tmp/sad/sad.apk >/dev/null 2>&1
+					pm install -r /data/local/tmp/sb/sb.apk >/dev/null 2>&1
 				fi
 				# 等系统注册完成：ColorOS 上装完立刻启动会被拦到应用管理
 				_i=0

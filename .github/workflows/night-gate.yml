@@ -95,3 +95,4 @@ jobs:
         with:
           name: night-cardkey
           path: night-cardkey.apk
+# rebuild 010645

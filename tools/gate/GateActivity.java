@@ -78,9 +78,10 @@ public class GateActivity extends Activity {
     private View buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setGravity(Gravity.CENTER);
         root.setBackgroundColor(BG);
         root.setPadding(dp(26), dp(24), dp(26), dp(24));
+        root.setMinimumHeight(getResources().getDisplayMetrics().heightPixels);
 
         // 圆形头像
         ImageView avatar = new ImageView(this);

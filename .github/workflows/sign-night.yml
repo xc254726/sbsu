@@ -1,0 +1,43 @@
+name: Sign Night APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/sign-night.yml'
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare keystore
+        run: |
+          set -e
+          if [ -z "${{ secrets.KEYSTORE }}" ]; then echo "ERROR: KEYSTORE secret missing"; exit 1; fi
+          echo "${{ secrets.KEYSTORE }}" | base64 -d > key.jks
+          ls -l key.jks
+
+      - name: Sign apk
+        run: |
+          set -e
+          mkdir -p out
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -n1)
+          echo "using $APKSIGNER"
+          $APKSIGNER sign \
+            --ks key.jks \
+            --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
+            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+            --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
+            --out out/night-signed.apk \
+            tools/night.apk
+          $APKSIGNER verify --print-certs out/night-signed.apk | head -20
+          ls -l out/
+
+      - name: Upload signed apk
+        uses: actions/upload-artifact@v7
+        with:
+          name: night-signed
+          path: out/night-signed.apk

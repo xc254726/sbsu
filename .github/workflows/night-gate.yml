@@ -59,7 +59,20 @@ jobs:
           '''
           s = s.replace('</application>', gate + '</application>')
           open(p, 'w', encoding='utf-8').write(s)
-          print('gate inserted')
+          # 3) 改应用名 Night -> hh
+          import re as _re
+          m = _re.search(r'<application\b[^>]*>', s)
+          if m:
+              tag = m.group(0)
+              if 'android:label=' in tag:
+                  tag2 = _re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"hh\"', tag)
+              else:
+                  tag2 = tag[:-1] + ' android:label=\"hh\">'
+              s = s.replace(tag, tag2, 1)
+              open(p, 'w', encoding='utf-8').write(s)
+              print('label set to hh')
+          else:
+              print('application tag not found')
           PY
           grep -c "com.sb.gate.GateActivity" night/AndroidManifest.xml
 
@@ -95,4 +108,3 @@ jobs:
         with:
           name: night-cardkey
           path: night-cardkey.apk
-# rebuild 010645

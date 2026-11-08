@@ -782,7 +782,7 @@ private fun InfoCard(
                 icon = Icons.TwoTone.Memory.takeIf { showHomeCardIcons },
                 iconPlaceholder = false,
                 title = stringResource(R.string.home_kernel_version),
-                description = systemStatus.ksuFullVersion.orEmpty(),
+                description = systemStatus.ksuFullVersion.orEmpty().substringBefore("@"),
             )
         }
 

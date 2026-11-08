@@ -136,7 +136,21 @@ jobs:
           print('res patched')
           PY
           grep -o 'package="[^"]*"' evil/AndroidManifest.xml | head -2
-      - name: Rebuild
+      - name: Bump version code
+        run: |
+          set -e
+          python3 - <<'PY'
+          import re
+          p = 'evil/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          m = re.search(r'android:versionCode="(\d+)"', s)
+          cur = int(m.group(1)) if m else 0
+          new = 34000
+          s = re.sub(r'android:versionCode="\d+"', 'android:versionCode="%d"' % new, s)
+          s = re.sub(r'android:versionName="[^"]*"', 'android:versionName="v3.3.1-hh"', s)
+          open(p, 'w', encoding='utf-8').write(s)
+          print('versionCode %d -> %d' % (cur, new))
+          PY      - name: Rebuild
         run: |
           set -e
           rm -f evil/res/xml/_generated_res_locale_config.xml || true

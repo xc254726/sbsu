@@ -15,7 +15,7 @@ jobs:
       - name: Tools
         run: |
           set -e
-          curl -sL -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
+          curl -sL -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar
           unzip -l apktool.jar | head -3
           echo "BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n1)" >> $GITHUB_ENV
           echo "ANDROID_JAR=$(ls $ANDROID_HOME/platforms/*/android.jar | sort -V | tail -n1)" >> $GITHUB_ENV
@@ -66,6 +66,7 @@ jobs:
       - name: Rebuild
         run: |
           set -e
+          rm -f night/res/xml/_generated_res_locale_config.xml || true
           java -jar apktool.jar b night -o unsigned.apk
           ls -l unsigned.apk
           zip -q unsigned.apk classes2.dex

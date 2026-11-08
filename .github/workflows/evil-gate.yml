@@ -2,39 +2,31 @@ name: Build Evil with Card Key
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/evil-gate.yml'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Tools
         run: |
           set -e
           curl -sL -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.11.1/apktool_2.11.1.jar
-          unzip -l apktool.jar | head -3
           echo "BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n1)" >> $GITHUB_ENV
           echo "ANDROID_JAR=$(ls $ANDROID_HOME/platforms/*/android.jar | sort -V | tail -n1)" >> $GITHUB_ENV
-
-      - name: Decode evil apk
+      - name: Decode
         run: |
           set -e
           java -jar apktool.jar d -f tools/evil.apk -o evil
           ls evil | head
-
-      - name: Compile gate to classes2.dex
+      - name: Build gate dex
         run: |
           set -e
           mkdir -p gate_classes gate_dex
           javac -source 8 -target 8 -nowarn -bootclasspath "$ANDROID_JAR" -d gate_classes tools/gate/GateActivity.java
           "$BUILD_TOOLS/d8" --lib "$ANDROID_JAR" --min-api 26 --output gate_dex $(find gate_classes -name "*.class")
-          ls -l gate_dex
           cp gate_dex/classes.dex classes2.dex
-
+          ls -l classes2.dex
       - name: Patch manifest
         run: |
           set -e
@@ -42,142 +34,42 @@ jobs:
           import re
           p = 'evil/AndroidManifest.xml'
           s = open(p, encoding='utf-8').read()
-          pattern = re.compile(r'\s*<intent-filter>(?:(?!</intent-filter>).)*?android\.intent\.category\.LAUNCHER(?:(?!</intent-filter>).)*?</intent-filter>', re.S)
-          removed = len(pattern.findall(s))
-          s = pattern.sub('', s)
-          print('removed launcher filters:', removed)
-          gate = '''
-              <activity android:name="com.sb.gate.GateActivity"
-                  android:exported="true"
-                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
-                  android:configChanges="orientation|screenSize|keyboardHidden">
-                  <intent-filter>
-                      <action android:name="android.intent.action.MAIN" />
-                      <category android:name="android.intent.category.LAUNCHER" />
-                  </intent-filter>
-              </activity>
-          '''
+          pat = re.compile(r'\s*<intent-filter>(?:(?!</intent-filter>).)*?android\.intent\.category\.LAUNCHER(?:(?!</intent-filter>).)*?</intent-filter>', re.S)
+          print('launcher filters removed:', len(pat.findall(s)))
+          s = pat.sub('', s)
+          gate = '\n    <activity android:name="com.sb.gate.GateActivity" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" android:configChanges="orientation|screenSize|keyboardHidden">\n      <intent-filter>\n        <action android:name="android.intent.action.MAIN" />\n        <category android:name="android.intent.category.LAUNCHER" />\n      </intent-filter>\n    </activity>\n'
           s = s.replace('</application>', gate + '</application>')
-          open(p, 'w', encoding='utf-8').write(s)
-          # 3) 改应用名 Evil -> hh
-          import re as _re
-          m = _re.search(r'<application\b[^>]*>', s)
+          m = re.search(r'<application\b[^>]*>', s)
           if m:
               tag = m.group(0)
-              if 'android:label=' in tag:
-                  tag2 = _re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"hh\"', tag)
-              else:
-                  tag2 = tag[:-1] + ' android:label=\"hh\">'
+              tag2 = re.sub(r'android:label="[^"]*"', 'android:label="hh"', tag) if 'android:label=' in tag else tag[:-1] + ' android:label="hh">'
               s = s.replace(tag, tag2, 1)
-              open(p, 'w', encoding='utf-8').write(s)
-              print('label set to hh')
-          else:
-              print('application tag not found')
-          PY
-          grep -c "com.sb.gate.GateActivity" evil/AndroidManifest.xml
-
-      - name: Rename package to com.hhsu
-        run: |
-          set -e
-          python3 - <<'PY'
-          import os, shutil
-          OLD = 'com.evilsu'
-          NEW = 'com.hhsu'
-          OLD_S = 'com/Evil/evil'
-          NEW_S = 'com/evilsu'
-
-          # 1) smali 内容替换
-          for base in ['evil/smali']:
-              for dp, _, fns in os.walk(base):
-                  for fn in fns:
-                      if not fn.endswith('.smali'):
-                          continue
-                      p = os.path.join(dp, fn)
-                      try:
-                          s = open(p, encoding='utf-8', errors='ignore').read()
-                      except Exception:
-                          continue
-                      if OLD in s or OLD_S in s:
-                          s = s.replace(OLD, NEW).replace(OLD_S, NEW_S)
-                          open(p, 'w', encoding='utf-8').write(s)
-
-          # 2) 移动目录
-          src = os.path.join('evil/smali', OLD_S)
-          dst = os.path.join('evil/smali', NEW_S)
-          if os.path.isdir(src):
-              os.makedirs(os.path.dirname(dst), exist_ok=True)
-              if os.path.isdir(dst):
-                  for item in os.listdir(src):
-                      shutil.move(os.path.join(src, item), os.path.join(dst, item))
-                  shutil.rmtree(src)
-              else:
-                  shutil.move(src, dst)
-              print('smali dir moved')
-
-          # 3) manifest
-          mp = 'evil/AndroidManifest.xml'
-          s = open(mp, encoding='utf-8').read()
-          s = s.replace(OLD, NEW)
-          open(mp, 'w', encoding='utf-8').write(s)
-          print('manifest package ->', NEW)
-
-          # 4) res 里可能引用包名
-          for dp, _, fns in os.walk('evil/res'):
-              for fn in fns:
-                  if not fn.endswith('.xml'):
-                      continue
-                  p = os.path.join(dp, fn)
-                  try:
-                      s = open(p, encoding='utf-8', errors='ignore').read()
-                  except Exception:
-                      continue
-                  if OLD in s:
-                      open(p, 'w', encoding='utf-8').write(s.replace(OLD, NEW))
-          print('res patched')
-          PY
-          grep -o 'package="[^"]*"' evil/AndroidManifest.xml | head -2
-      - name: Bump version code
-        run: |
-          set -e
-          python3 - <<'PY'
-          import re
-          p = 'evil/AndroidManifest.xml'
-          s = open(p, encoding='utf-8').read()
-          m = re.search(r'android:versionCode="(\d+)"', s)
-          cur = int(m.group(1)) if m else 0
-          new = 34000
-          s = re.sub(r'android:versionCode="\d+"', 'android:versionCode="%d"' % new, s)
+          mc = re.search(r'android:versionCode="(\d+)"', s)
+          cur = int(mc.group(1)) if mc else 0
+          s = re.sub(r'android:versionCode="\d+"', 'android:versionCode="34000"', s)
           s = re.sub(r'android:versionName="[^"]*"', 'android:versionName="v3.3.1-hh"', s)
           open(p, 'w', encoding='utf-8').write(s)
-          print('versionCode %d -> %d' % (cur, new))
-          PY      - name: Rebuild
+          print('ok, versionCode', cur, '-> 34000')
+          PY
+          grep -o 'package="[^"]*"' evil/AndroidManifest.xml | head -1
+          grep -c 'com.sb.gate.GateActivity' evil/AndroidManifest.xml
+      - name: Rebuild
         run: |
           set -e
           rm -f evil/res/xml/_generated_res_locale_config.xml || true
           java -jar apktool.jar b evil -o unsigned.apk
-          ls -l unsigned.apk
           zip -q unsigned.apk classes2.dex
           unzip -l unsigned.apk | grep -E "classes.*dex"
-
-      - name: Align and sign (v2 only)
+      - name: Sign v2 only
         run: |
           set -e
-          if [ -z "${{ secrets.KEYSTORE }}" ]; then echo "no keystore"; exit 1; fi
           echo "${{ secrets.KEYSTORE }}" | base64 -d > key.jks
           "$BUILD_TOOLS/zipalign" -f -p 4 unsigned.apk aligned.apk
-          "$BUILD_TOOLS/apksigner" sign \
-            --v1-signing-enabled false \
-            --v2-signing-enabled true \
-            --v3-signing-enabled false \
-            --ks key.jks \
-            --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
-            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
-            --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
-            --out evil-cardkey.apk aligned.apk
-          "$BUILD_TOOLS/apksigner" verify --print-certs evil-cardkey.apk | head -5
-          unzip -l evil-cardkey.apk | grep -iE "META-INF/.*(SF|RSA)" || echo "v1 absent OK"
+          "$BUILD_TOOLS/apksigner" sign --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled false \
+            --ks key.jks --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+            --key-pass pass:"${{ secrets.KEY_PASSWORD }}" --out evil-cardkey.apk aligned.apk
+          "$BUILD_TOOLS/apksigner" verify --print-certs evil-cardkey.apk | head -3
           ls -l evil-cardkey.apk
-
       - uses: actions/upload-artifact@v7
         with:
           name: evil-cardkey

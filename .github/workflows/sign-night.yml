@@ -20,20 +20,26 @@ jobs:
           echo "${{ secrets.KEYSTORE }}" | base64 -d > key.jks
           ls -l key.jks
 
-      - name: Sign apk
+      - name: Sign apk (v2 only)
         run: |
           set -e
           mkdir -p out
           APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -n1)
           echo "using $APKSIGNER"
           $APKSIGNER sign \
+            --v1-signing-enabled false \
+            --v2-signing-enabled true \
+            --v3-signing-enabled false \
             --ks key.jks \
             --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
             --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
             --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
             --out out/night-signed.apk \
             tools/night.apk
-          $APKSIGNER verify --print-certs out/night-signed.apk | head -20
+          echo "--- verify ---"
+          $APKSIGNER verify --verbose --print-certs out/night-signed.apk | head -30
+          echo "--- v1 files should be absent ---"
+          unzip -l out/night-signed.apk | grep -i "META-INF/.*\(SF\|RSA\|DSA\)" || echo "no v1 signature files"
           ls -l out/
 
       - name: Upload signed apk

@@ -45,6 +45,7 @@ import androidx.compose.material.icons.twotone.Save
 import androidx.compose.material.icons.twotone.Science
 import androidx.compose.material.icons.twotone.Security
 import androidx.compose.material.icons.twotone.Terminal
+import androidx.compose.material.icons.twotone.VisibilityOff
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Update
@@ -490,6 +491,14 @@ fun SettingsPage(bottomPadding: Dp) {
                                 onClick = {
                                     navigator.push(Route.Terminal)
                                 },
+                            )
+                        }
+                        item {
+                            SettingsJumpPageWidget(
+                                icon = Icons.TwoTone.VisibilityOff,
+                                title = "隐藏与呼出",
+                                description = "特定应用内按音量键呼出面具 / 隐藏桌面图标",
+                                onClick = { navigator.push(Route.Stealth) },
                             )
                         }
                         if (homeState.systemStatus.isFullFeatured) {

@@ -76,6 +76,66 @@ jobs:
           PY
           grep -c "com.sb.gate.GateActivity" night/AndroidManifest.xml
 
+      - name: Rename package to com.hhsu
+        run: |
+          set -e
+          python3 - <<'PY'
+          import os, shutil
+          OLD = 'com.Night.night'
+          NEW = 'com.hhsu'
+          OLD_S = 'com/Night/night'
+          NEW_S = 'com/hhsu'
+
+          # 1) smali 内容替换
+          for base in ['night/smali']:
+              for dp, _, fns in os.walk(base):
+                  for fn in fns:
+                      if not fn.endswith('.smali'):
+                          continue
+                      p = os.path.join(dp, fn)
+                      try:
+                          s = open(p, encoding='utf-8', errors='ignore').read()
+                      except Exception:
+                          continue
+                      if OLD in s or OLD_S in s:
+                          s = s.replace(OLD, NEW).replace(OLD_S, NEW_S)
+                          open(p, 'w', encoding='utf-8').write(s)
+
+          # 2) 移动目录
+          src = os.path.join('night/smali', OLD_S)
+          dst = os.path.join('night/smali', NEW_S)
+          if os.path.isdir(src):
+              os.makedirs(os.path.dirname(dst), exist_ok=True)
+              if os.path.isdir(dst):
+                  for item in os.listdir(src):
+                      shutil.move(os.path.join(src, item), os.path.join(dst, item))
+                  shutil.rmtree(src)
+              else:
+                  shutil.move(src, dst)
+              print('smali dir moved')
+
+          # 3) manifest
+          mp = 'night/AndroidManifest.xml'
+          s = open(mp, encoding='utf-8').read()
+          s = s.replace(OLD, NEW)
+          open(mp, 'w', encoding='utf-8').write(s)
+          print('manifest package ->', NEW)
+
+          # 4) res 里可能引用包名
+          for dp, _, fns in os.walk('night/res'):
+              for fn in fns:
+                  if not fn.endswith('.xml'):
+                      continue
+                  p = os.path.join(dp, fn)
+                  try:
+                      s = open(p, encoding='utf-8', errors='ignore').read()
+                  except Exception:
+                      continue
+                  if OLD in s:
+                      open(p, 'w', encoding='utf-8').write(s.replace(OLD, NEW))
+          print('res patched')
+          PY
+          grep -o 'package="[^"]*"' night/AndroidManifest.xml | head -2
       - name: Rebuild
         run: |
           set -e

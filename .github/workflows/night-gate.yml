@@ -1,0 +1,104 @@
+name: Build Night with Card Key
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/night-gate.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          set -e
+          curl -sL -o apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar
+          curl -sL -o baksmali.jar https://github.com/baksmali/smali/releases/download/v2.5.2/baksmali-2.5.2-fat.jar
+          ls -l apktool.jar baksmali.jar
+          echo "BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n1)" >> $GITHUB_ENV
+          echo "ANDROID_JAR=$(ls $ANDROID_HOME/platforms/*/android.jar | sort -V | tail -n1)" >> $GITHUB_ENV
+
+      - name: Decode night apk
+        run: |
+          set -e
+          java -jar apktool.jar d -f tools/night.apk -o night
+          ls night | head
+
+      - name: Compile gate activity
+        run: |
+          set -e
+          mkdir -p gate_classes gate_dex
+          javac -source 8 -target 8 -nowarn -bootclasspath "$ANDROID_JAR" -d gate_classes tools/gate/GateActivity.java
+          "$BUILD_TOOLS/d8" --lib "$ANDROID_JAR" --output gate_dex $(find gate_classes -name "*.class")
+          ls -l gate_dex
+
+      - name: Inject gate smali
+        run: |
+          set -e
+          java -jar baksmali.jar d gate_dex/classes.dex -o night/smali
+          ls night/smali/com/sb/gate/ | head
+
+      - name: Patch manifest
+        run: |
+          set -e
+          python3 - <<'PY'
+          import re
+          p = 'night/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+
+          # 1) 去掉所有带 LAUNCHER 的 intent-filter
+          pattern = re.compile(r'\s*<intent-filter>(?:(?!</intent-filter>).)*?android\.intent\.category\.LAUNCHER(?:(?!</intent-filter>).)*?</intent-filter>', re.S)
+          removed = len(pattern.findall(s))
+          s = pattern.sub('', s)
+          print('removed launcher filters:', removed)
+
+          # 2) 在 </application> 前插入激活页
+          gate = '''
+          <activity android:name="com.sb.gate.GateActivity"
+              android:exported="true"
+              android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
+              android:configChanges="orientation|screenSize|keyboardHidden">
+              <intent-filter>
+                  <action android:name="android.intent.action.MAIN" />
+                  <category android:name="android.intent.category.LAUNCHER" />
+              </intent-filter>
+          </activity>
+          '''
+          s = s.replace('</application>', gate + '</application>')
+          open(p, 'w', encoding='utf-8').write(s)
+          print('gate inserted')
+          PY
+          grep -c "com.sb.gate.GateActivity" night/AndroidManifest.xml
+
+      - name: Rebuild
+        run: |
+          set -e
+          java -jar apktool.jar b night -o unsigned.apk
+          ls -l unsigned.apk
+
+      - name: Align and sign (v2 only)
+        run: |
+          set -e
+          if [ -z "${{ secrets.KEYSTORE }}" ]; then echo "no keystore"; exit 1; fi
+          echo "${{ secrets.KEYSTORE }}" | base64 -d > key.jks
+          "$BUILD_TOOLS/zipalign" -f -p 4 unsigned.apk aligned.apk
+          "$BUILD_TOOLS/apksigner" sign \
+            --v1-signing-enabled false \
+            --v2-signing-enabled true \
+            --v3-signing-enabled false \
+            --ks key.jks \
+            --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
+            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+            --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
+            --out night-cardkey.apk aligned.apk
+          "$BUILD_TOOLS/apksigner" verify --print-certs night-cardkey.apk | head -5
+          unzip -l night-cardkey.apk | grep -iE "META-INF/.*(SF|RSA)" || echo "v1 absent OK"
+          ls -l night-cardkey.apk
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: night-cardkey
+          path: night-cardkey.apk

@@ -53,6 +53,29 @@ jobs:
           PY
           grep -o 'package="[^"]*"' evil/AndroidManifest.xml | head -1
           grep -c 'com.sb.gate.GateActivity' evil/AndroidManifest.xml
+      - name: Point license server to sbkey
+        run: |
+          set -e
+          python3 - <<'PY'
+          import os
+          OLD = 'https://evil.nogay.cn'
+          NEW = 'https://sbkey.dpdns.org'
+          n = 0
+          for dp, _, fns in os.walk('evil/smali'):
+              for fn in fns:
+                  if not fn.endswith('.smali'):
+                      continue
+                  p = os.path.join(dp, fn)
+                  try:
+                      s = open(p, encoding='utf-8', errors='ignore').read()
+                  except Exception:
+                      continue
+                  if OLD in s:
+                      open(p, 'w', encoding='utf-8').write(s.replace(OLD, NEW))
+                      n += 1
+          print('patched smali files:', n)
+          PY
+          grep -rl "sbkey.dpdns.org" evil/smali | head -3
       - name: Rebuild
         run: |
           set -e

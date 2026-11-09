@@ -19,6 +19,19 @@ jobs:
           set -e
           java -jar apktool.jar d -f tools/evil.apk -o evil
           ls evil | head
+      - name: Locate cardkey screen
+        run: |
+          echo "==== cardkey ids ===="
+          grep -i "cardkey" evil/res/values/public.xml | head -20
+          echo "==== id -> smali ===="
+          for id in $(grep -i "cardkey" evil/res/values/public.xml | sed 's/.*id="\(0x[0-9a-f]*\)".*/\1/' | sort -u); do
+            echo "--- $id ---"
+            grep -rl "$id" evil/smali | head -4
+          done
+          echo "==== 谁引用 cardkey 字符串名 ===="
+          grep -rl "cardkey_subtitle\|cardkey_label" evil/smali 2>/dev/null | head -10
+          echo "==== evil- 设备码拼接处 ===="
+          grep -rln "evil-" evil/smali | head -10
       - name: Build gate dex
         run: |
           set -e

@@ -31,6 +31,16 @@ jobs:
           grep -rn "LicenseActivity\|ActivationActivity\|LoginActivity" evil/smali | head -20
           echo "===== manifest activities ====="
           grep -o 'activity android:name="[^"]*"' evil/AndroidManifest.xml | head -20
+      - name: Probe license classes
+        run: |
+          for f in evil/smali/o/a20.smali evil/smali/o/Hygq.smali evil/smali/o/bzOZKZ.smali; do
+            echo "==== $f ===="
+            grep -n "^\.method\|^\.field" "$f" | head -50
+          done
+          echo "==== who references them ===="
+          grep -rl "Lo/a20;\|Lo/Hygq;\|Lo/bzOZKZ;" evil/smali | head -25
+          echo "==== cardkey ids in smali ===="
+          grep -rn "cardkey" evil/smali | head -20
       - name: Build gate dex
         run: |
           set -e

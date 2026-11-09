@@ -19,6 +19,18 @@ jobs:
           set -e
           java -jar apktool.jar d -f tools/evil.apk -o evil
           ls evil | head
+      - name: Probe license logic
+        run: |
+          echo "===== smali files with license ====="
+          grep -rl -i "license" evil/smali | head -30
+          echo "===== strings 301000 ====="
+          grep -rn "License\|license" evil/smali | grep -iE "activity|isActivated|isLicensed|checkLicense|verify|activate" | head -30
+          echo "===== 中文卡密串 ====="
+          grep -rn "卡密" evil/res/values/strings.xml | head -20
+          echo "===== 谁引用卡密 activity ====="
+          grep -rn "LicenseActivity\|ActivationActivity\|LoginActivity" evil/smali | head -20
+          echo "===== manifest activities ====="
+          grep -o 'activity android:name="[^"]*"' evil/AndroidManifest.xml | head -20
       - name: Build gate dex
         run: |
           set -e

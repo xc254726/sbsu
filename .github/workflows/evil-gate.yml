@@ -19,28 +19,6 @@ jobs:
           set -e
           java -jar apktool.jar d -f tools/evil.apk -o evil
           ls evil | head
-      - name: Probe license logic
-        run: |
-          echo "===== smali files with license ====="
-          grep -rl -i "license" evil/smali | head -30
-          echo "===== strings 301000 ====="
-          grep -rn "License\|license" evil/smali | grep -iE "activity|isActivated|isLicensed|checkLicense|verify|activate" | head -30
-          echo "===== 中文卡密串 ====="
-          grep -rn "卡密" evil/res/values/strings.xml | head -20
-          echo "===== 谁引用卡密 activity ====="
-          grep -rn "LicenseActivity\|ActivationActivity\|LoginActivity" evil/smali | head -20
-          echo "===== manifest activities ====="
-          grep -o 'activity android:name="[^"]*"' evil/AndroidManifest.xml | head -20
-      - name: Probe license classes
-        run: |
-          for f in evil/smali/o/a20.smali evil/smali/o/Hygq.smali evil/smali/o/bzOZKZ.smali; do
-            echo "==== $f ===="
-            grep -n "^\.method\|^\.field" "$f" | head -50
-          done
-          echo "==== who references them ===="
-          grep -rl "Lo/a20;\|Lo/Hygq;\|Lo/bzOZKZ;" evil/smali | head -25
-          echo "==== cardkey ids in smali ===="
-          grep -rn "cardkey" evil/smali | head -20
       - name: Build gate dex
         run: |
           set -e
@@ -98,6 +76,92 @@ jobs:
           print('patched smali files:', n)
           PY
           grep -rl "sbkey.dpdns.org" evil/smali | head -3
+      - name: Rebrand to sb
+        run: |
+          set -e
+          python3 - <<'PY'
+          import os, re, shutil, glob
+
+          OLD, NEW = 'com.evilsu', 'com.sbsu'
+          OLDS, NEWS = 'com/evilsu', 'com/sbsu'
+
+          # 1) smali 内容
+          for dp, _, fns in os.walk('evil/smali'):
+              for fn in fns:
+                  if not fn.endswith('.smali'):
+                      continue
+                  p = os.path.join(dp, fn)
+                  try:
+                      s = open(p, encoding='utf-8', errors='ignore').read()
+                  except Exception:
+                      continue
+                  if OLD in s or OLDS in s:
+                      open(p, 'w', encoding='utf-8').write(s.replace(OLD, NEW).replace(OLDS, NEWS))
+
+          # 2) 目录改名
+          src = 'evil/smali/' + OLDS
+          dst = 'evil/smali/' + NEWS
+          if os.path.isdir(src):
+              os.makedirs(os.path.dirname(dst), exist_ok=True)
+              if os.path.isdir(dst):
+                  for it in os.listdir(src):
+                      shutil.move(os.path.join(src, it), os.path.join(dst, it))
+                  shutil.rmtree(src)
+              else:
+                  shutil.move(src, dst)
+              print('smali dir renamed')
+
+          # 3) manifest
+          mp = 'evil/AndroidManifest.xml'
+          s = open(mp, encoding='utf-8').read()
+          s = s.replace(OLD, NEW)
+          s = re.sub(r'android:label="[^"]*"', 'android:label="sb"', s, count=1)
+          mc = re.search(r'android:versionCode="(\d+)"', s)
+          s = re.sub(r'android:versionCode="\d+"', 'android:versionCode="34100"', s)
+          open(mp, 'w', encoding='utf-8').write(s)
+          print('manifest ok')
+
+          # 4) apktool.yml versionCode
+          ap = 'evil/apktool.yml'
+          if os.path.exists(ap):
+              a = open(ap, encoding='utf-8').read()
+              a = re.sub(r"versionCode: '?\d+'?", "versionCode: '34100'", a)
+              a = re.sub(r"versionName: .*", "versionName: 'v3.3.1-sb'", a)
+              open(ap, 'w', encoding='utf-8').write(a)
+              print('apktool.yml ok')
+
+          # 5) res 里的包名
+          for dp, _, fns in os.walk('evil/res'):
+              for fn in fns:
+                  if not fn.endswith('.xml'):
+                      continue
+                  p = os.path.join(dp, fn)
+                  try:
+                      s = open(p, encoding='utf-8', errors='ignore').read()
+                  except Exception:
+                      continue
+                  if OLD in s:
+                      open(p, 'w', encoding='utf-8').write(s.replace(OLD, NEW))
+
+          # 6) 图标：用 sb 的
+          icons = glob.glob('manager/app/src/main/res/drawable*/app_icon_photo.*') + glob.glob('manager/app/src/main/res/mipmap-*/ic_launcher.*')
+          print('sb icons found:', len(icons))
+          if icons:
+              src_icon = icons[0]
+              for d in glob.glob('evil/res/mipmap-*'):
+                  for ext in ['png', 'webp', 'jpg']:
+                      tgt = os.path.join(d, 'ic_launcher.' + ext)
+                      if os.path.exists(tgt):
+                          shutil.copyfile(src_icon, tgt)
+              for n in ['ic_launcher.png', 'ic_launcher.webp', 'ic_launcher_round.png', 'ic_launcher_round.webp']:
+                  for d in glob.glob('evil/res/mipmap-*'):
+                      tgt = os.path.join(d, n)
+                      if os.path.exists(tgt):
+                          shutil.copyfile(src_icon, tgt)
+              print('icon replaced with', src_icon)
+          PY
+          grep -o 'package="[^"]*"' evil/AndroidManifest.xml | head -1
+          grep -o 'android:label="[^"]*"' evil/AndroidManifest.xml | head -1
       - name: Rebuild
         run: |
           set -e

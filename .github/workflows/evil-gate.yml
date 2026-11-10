@@ -21,12 +21,12 @@ jobs:
           ls evil | head
       - name: Locate cardkey screen
         run: |
-          echo "==== WsKuo 全部 const-string ===="
-          grep -oE 'const-string[^,]*, "[^"]*"' evil/smali/o/WsKuo.smali | sed 's/.*, //' | head -80
-          echo "==== WsKuo 方法列表 ===="
-          grep -n "^\.method" evil/smali/o/WsKuo.smali | head -30
-          echo "==== 疑似密钥（长串）===="
-          grep -oE '"[A-Za-z0-9+/=_-]{16,}"' evil/smali/o/WsKuo.smali | head -20
+          echo "==== 谁构造 WsKuo ===="
+          grep -rn "Lo/WsKuo;-><init>" evil/smali | head -10
+          echo "==== 构造点附近的 const-string ===="
+          f=$(grep -rl "Lo/WsKuo;-><init>" evil/smali | grep -v "o/WsKuo" | head -1)
+          echo "file: $f"
+          grep -n "const-string" "$f" | head -30
       - name: Build gate dex
         run: |
           set -e

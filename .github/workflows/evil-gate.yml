@@ -21,12 +21,12 @@ jobs:
           ls evil | head
       - name: Locate cardkey screen
         run: |
-          echo "==== all activities ===="
-          grep -oE '<activity[^>]*android:name="[^"]+"' evil/AndroidManifest.xml | sed 's/.*android:name="//' | tr -d '"' | head -40
-          echo "==== cardkey/license 相关 activity ===="
-          grep -iE "cardkey|license|activate|login" evil/AndroidManifest.xml | head -20
-          echo "==== XrsWVS 的调用方法（找 UI 入口）===="
-          grep -rn "Lo/XrsWVS;->" evil/smali | head -10
+          echo "==== Hygq 里的字符串常量（JSON 字段名）===="
+          grep -oE 'const-string[^,]*, "[^"]*"' evil/smali/o/Hygq.smali | sed 's/.*, //' | head -40
+          echo "==== a20 里的字符串常量 ===="
+          grep -oE 'const-string[^,]*, "[^"]*"' evil/smali/o/a20.smali | sed 's/.*, //' | head -30
+          echo "==== 全仓搜 json 字段名 ===="
+          grep -rhoE '"(license|device|expires|expireAt|expire_at|token|ok|success|code|msg|message|status|data)"' evil/smali | sort | uniq -c | sort -rn | head -25
       - name: Build gate dex
         run: |
           set -e

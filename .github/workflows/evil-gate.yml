@@ -21,17 +21,15 @@ jobs:
           ls evil | head
       - name: Locate cardkey screen
         run: |
-          echo "==== cardkey ids ===="
-          grep -i "cardkey" evil/res/values/public.xml | head -20
-          echo "==== id -> smali ===="
-          for id in $(grep -i "cardkey" evil/res/values/public.xml | sed 's/.*id="\(0x[0-9a-f]*\)".*/\1/' | sort -u); do
+          echo "==== methods in XrsWVS ===="
+          grep -n "^\.method" evil/smali/o/XrsWVS.smali | head -20
+          echo "==== 引用 XrsWVS 的文件 ===="
+          grep -rl "Lo/XrsWVS;" evil/smali | grep -v "o/XrsWVS" | head -10
+          echo "==== 引用 cardkey 字符串 id 的其它文件 ===="
+          for id in 0x7f0a0023 0x7f0a002b 0x7f0a002c; do
             echo "--- $id ---"
-            grep -rl "$id" evil/smali | head -4
+            grep -rl "$id" evil/smali | head -6
           done
-          echo "==== 谁引用 cardkey 字符串名 ===="
-          grep -rl "cardkey_subtitle\|cardkey_label" evil/smali 2>/dev/null | head -10
-          echo "==== evil- 设备码拼接处 ===="
-          grep -rln "evil-" evil/smali | head -10
       - name: Build gate dex
         run: |
           set -e

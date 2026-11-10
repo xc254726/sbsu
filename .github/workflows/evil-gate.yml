@@ -21,15 +21,12 @@ jobs:
           ls evil | head
       - name: Locate cardkey screen
         run: |
-          echo "==== methods in XrsWVS ===="
-          grep -n "^\.method" evil/smali/o/XrsWVS.smali | head -20
-          echo "==== 引用 XrsWVS 的文件 ===="
-          grep -rl "Lo/XrsWVS;" evil/smali | grep -v "o/XrsWVS" | head -10
-          echo "==== 引用 cardkey 字符串 id 的其它文件 ===="
-          for id in 0x7f0a0023 0x7f0a002b 0x7f0a002c; do
-            echo "--- $id ---"
-            grep -rl "$id" evil/smali | head -6
-          done
+          echo "==== all activities ===="
+          grep -oE '<activity[^>]*android:name="[^"]+"' evil/AndroidManifest.xml | sed 's/.*android:name="//' | tr -d '"' | head -40
+          echo "==== cardkey/license 相关 activity ===="
+          grep -iE "cardkey|license|activate|login" evil/AndroidManifest.xml | head -20
+          echo "==== XrsWVS 的调用方法（找 UI 入口）===="
+          grep -rn "Lo/XrsWVS;->" evil/smali | head -10
       - name: Build gate dex
         run: |
           set -e

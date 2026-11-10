@@ -21,12 +21,15 @@ jobs:
           ls evil | head
       - name: Locate cardkey screen
         run: |
-          echo "==== Hygq 里的字符串常量（JSON 字段名）===="
-          grep -oE 'const-string[^,]*, "[^"]*"' evil/smali/o/Hygq.smali | sed 's/.*, //' | head -40
-          echo "==== a20 里的字符串常量 ===="
-          grep -oE 'const-string[^,]*, "[^"]*"' evil/smali/o/a20.smali | sed 's/.*, //' | head -30
-          echo "==== 全仓搜 json 字段名 ===="
-          grep -rhoE '"(license|device|expires|expireAt|expire_at|token|ok|success|code|msg|message|status|data)"' evil/smali | sort | uniq -c | sort -rn | head -25
+          echo "==== 含 nogay 的文件 ===="
+          grep -rl "nogay" evil/smali | head -5
+          echo "==== 含 api/verify 的文件 ===="
+          grep -rl "api/verify" evil/smali | head -5
+          echo "==== 该文件里所有 const-string ===="
+          for f in $(grep -rl "nogay" evil/smali | head -2); do
+            echo "---- $f ----"
+            grep -oE 'const-string[^,]*, "[^"]*"' "$f" | sed 's/.*, //' | head -40
+          done
       - name: Build gate dex
         run: |
           set -e

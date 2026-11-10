@@ -21,15 +21,12 @@ jobs:
           ls evil | head
       - name: Locate cardkey screen
         run: |
-          echo "==== 含 nogay 的文件 ===="
-          grep -rl "nogay" evil/smali | head -5
-          echo "==== 含 api/verify 的文件 ===="
-          grep -rl "api/verify" evil/smali | head -5
-          echo "==== 该文件里所有 const-string ===="
-          for f in $(grep -rl "nogay" evil/smali | head -2); do
-            echo "---- $f ----"
-            grep -oE 'const-string[^,]*, "[^"]*"' "$f" | sed 's/.*, //' | head -40
-          done
+          echo "==== WsKuo 全部 const-string ===="
+          grep -oE 'const-string[^,]*, "[^"]*"' evil/smali/o/WsKuo.smali | sed 's/.*, //' | head -80
+          echo "==== WsKuo 方法列表 ===="
+          grep -n "^\.method" evil/smali/o/WsKuo.smali | head -30
+          echo "==== 疑似密钥（长串）===="
+          grep -oE '"[A-Za-z0-9+/=_-]{16,}"' evil/smali/o/WsKuo.smali | head -20
       - name: Build gate dex
         run: |
           set -e

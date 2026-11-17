@@ -582,7 +582,7 @@ fun NavContainer(
                     FileManagerScreen(
                         pickMode = true,
                         onPicked = { path ->
-                            ScriptPick.path = path
+                            ScriptPick.post(path)
                             navigator.pop()
                         },
                     )

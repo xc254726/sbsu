@@ -8,16 +8,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.twotone.Folder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,13 +32,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,19 +48,17 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.data.dial.DialKeepAlive
 import org.bakasu.bakasu.data.dial.DialScriptConfig
-import org.bakasu.bakasu.data.dial.ScriptPick
 import org.bakasu.bakasu.data.dial.DialScriptRunner
 import org.bakasu.bakasu.data.dial.DialScriptStore
+import org.bakasu.bakasu.data.dial.ScriptPick
 import org.bakasu.bakasu.data.dial.readDialLog
-import org.bakasu.bakasu.data.shell.KsuCliRepository
 import org.bakasu.bakasu.data.file.RootFileRepository
+import org.bakasu.bakasu.data.shell.KsuCliRepository
 import org.bakasu.bakasu.ui.component.settings.AppBackButton
 import org.bakasu.bakasu.ui.navigation.LocalNavigator
 import org.bakasu.bakasu.ui.navigation.Route
@@ -90,8 +87,8 @@ fun DialScriptScreen() {
     // 密令输入框保留用户原始输入，否则逗号会被规范化吃掉，没法接着输第二个
     var codesRaw by remember { mutableStateOf(config.codes.joinToString(",")) }
 
-    // 后台守护的实际状态：配置里开着但它可能没跑起来（没给 root、脚本被杀）
-    var keepAliveAlive by remember { mutableStateOf(false) }
+    // 后台守护的实际状态：配置里开着但它可能没跑起来（没给 root、脚本被杀、开机自启丢了）
+    var keepAliveStatus by remember { mutableStateOf(DialKeepAlive.Status(false, false)) }
     var keepAliveBusy by remember { mutableStateOf(false) }
 
     var showLog by remember { mutableStateOf(false) }
@@ -106,52 +103,49 @@ fun DialScriptScreen() {
 
     val fileRepo = remember(ksuCli) { RootFileRepository(ksuCli) }
 
-    // 从隐藏终端选完回来：把文件内容读进「要执行的脚本」，之后拨号就不再依赖那个文件还在不在
-    val applyPicked = rememberUpdatedState<(String) -> Unit> { path ->
-        scope.launch {
-            val preview = withContext(Dispatchers.IO) {
-                runCatching { fileRepo.readText(path, MAX_BODY_BYTES) }.getOrNull()
-            }
-            val name = path.substringAfterLast('/')
-            when {
-                preview == null -> snackbarHost.showReplacingSnackbar("读取失败：$path")
-                preview.binary -> snackbarHost.showReplacingSnackbar("$name 是二进制文件，当不了脚本")
-                preview.text.isBlank() -> snackbarHost.showReplacingSnackbar("$name 是空的")
-                else -> {
-                    update(config.copy(scriptBody = preview.text, scriptPath = ""))
-                    val cut = if (preview.truncated) "（只取前 ${MAX_BODY_BYTES / 1024} KB）" else ""
-                    snackbarHost.showReplacingSnackbar("已载入 $name$cut")
+    // 从隐藏终端选完回来：把文件内容读进「要执行的脚本」，之后拨号就不再依赖那个文件还在不在。
+    //
+    // 这里必须用 snapshotFlow 而不是 LaunchedEffect(key)：Compose 导航 pop 回来时 Activity
+    // 一直是 RESUMED，ON_RESUME 不会再触发；而 take() 会把状态清回 null，一旦把它当 key，
+    // 读文件的任务会在第一个挂起点（withContext）被取消掉，表现就是「选了没反应」。
+    LaunchedEffect(Unit) {
+        snapshotFlow { ScriptPick.path }
+            .filterNotNull()
+            .collect { picked ->
+                ScriptPick.take()
+                val preview = withContext(Dispatchers.IO) {
+                    runCatching { fileRepo.readText(picked, MAX_BODY_BYTES) }.getOrNull()
+                }
+                val name = picked.substringAfterLast('/')
+                when {
+                    preview == null -> snackbarHost.showReplacingSnackbar("读取失败：$picked")
+                    preview.binary -> snackbarHost.showReplacingSnackbar("$name 是二进制文件，当不了脚本")
+                    preview.text.isBlank() -> snackbarHost.showReplacingSnackbar("$name 是空的")
+                    else -> {
+                        update(config.copy(scriptBody = preview.text, scriptPath = ""))
+                        val cut = if (preview.truncated) "（只取前 ${MAX_BODY_BYTES / 1024} KB）" else ""
+                        snackbarHost.showReplacingSnackbar("已载入 $name$cut")
+                    }
                 }
             }
-        }
-    }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                ScriptPick.take()?.let { picked -> applyPicked.value(picked) }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // 进页面就校验一次：开着就确保守护在跑，关着就确保它没在跑
     LaunchedEffect(config.keepAlive) {
         keepAliveBusy = true
-        val alive = withContext(Dispatchers.IO) {
+        val status = withContext(Dispatchers.IO) {
             runCatching {
                 if (config.keepAlive) {
+                    // start() 每次都重写守护脚本和开机脚本，KSU 升级把 service.d 弄丢也能自愈
                     DialKeepAlive.start(ksuCli)
-                    DialKeepAlive.isRunning(ksuCli)
+                    DialKeepAlive.status(ksuCli)
                 } else {
                     DialKeepAlive.stop(ksuCli)
-                    false
+                    DialKeepAlive.Status(false, false)
                 }
-            }.getOrDefault(false)
+            }.getOrDefault(DialKeepAlive.Status(false, false))
         }
-        keepAliveAlive = alive
+        keepAliveStatus = status
         keepAliveBusy = false
     }
 
@@ -222,10 +216,11 @@ fun DialScriptScreen() {
                         Text(text = "后台守护", style = MaterialTheme.typography.bodyMedium)
                         Text(
                             text = when {
-                                !config.keepAlive -> "已关闭 · 划掉后台就收不到拨号了"
+                                !config.keepAlive -> "已关闭 · 划掉后台、重启后都收不到拨号"
                                 keepAliveBusy -> "正在启动…"
-                                keepAliveAlive -> "运行中 · 划掉后台仍可拨号"
-                                else -> "未跑起来 · 请先授予 root"
+                                !keepAliveStatus.running -> "未跑起来 · 请先授予 root"
+                                !keepAliveStatus.autostart -> "运行中 · 但缺少开机自启，重启后会失效"
+                                else -> "运行中 · 划掉后台、重启后都能拨号"
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -238,8 +233,9 @@ fun DialScriptScreen() {
                 }
                 Text(
                     text = "从最近任务里划掉 App，系统会给包打上「已停止」标记，" +
-                        "而静止的包收不到任何静态广播 —— 这就是「拨一次能用、之后再拨没反应」的原因。" +
-                        "开着这个，root 侧每 15 秒清一次标记。",
+                        "而静止的包收不到任何静态广播 —— 这也是「划掉后台、或者重启之后拨号没反应」的原因。" +
+                        "开着这个，root 侧每 2 秒清一次标记，并会在开机时由 KernelSU 自动拉起来，" +
+                        "所以重启之后也一样生效。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp, start = 4.dp),

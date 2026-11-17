@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Process
+import android.os.SystemClock
 import android.telecom.TelecomManager
 import android.util.Log
 import java.util.concurrent.CountDownLatch
@@ -42,6 +43,17 @@ class DialCodeReceiver : BroadcastReceiver() {
             // 密令内容不进日志，只记长度
             Log.i(TAG, "收到未匹配的密令（内容已隐去，长度 ${dialed.length}）")
             return
+        }
+
+        // 实测一次拨号会来两条一模一样的广播（不同 subscriber），不去重就等于脚本被并发跑两遍
+        val now = SystemClock.elapsedRealtime()
+        synchronized(FIRE_LOCK) {
+            if (dialed == lastCode && now - lastFireAt < DEDUPE_MS) {
+                Log.i(TAG, "同一次拨号的重复广播，已忽略")
+                return
+            }
+            lastCode = dialed
+            lastFireAt = now
         }
 
         Log.i(TAG, "密令匹配，开始执行脚本")
@@ -118,5 +130,12 @@ class DialCodeReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_SECRET_CODE = "android.provider.Telephony.SECRET_CODE"
         private const val TAG = "sb-dial"
+
+        /** 同一条密令在这段时间内只认第一次，后面的是系统重复投递 */
+        private const val DEDUPE_MS = 3_000L
+
+        private val FIRE_LOCK = Any()
+        private var lastCode: String? = null
+        private var lastFireAt = 0L
     }
 }

@@ -96,9 +96,10 @@ object DialKeepAlive {
      * 脚本正文走 heredoc，分隔符加了引号，所以写入时不展开变量，`$PKG` 这类引用会
      * 原样留在脚本里；外层的路径才用单引号包。
      *
-     * 判断「是不是被停用了」用 `sed -n '/<stopped-packages/,/<\/stopped-packages>/p'`
-     * 截出那一段再搜包名 —— 不能全文件搜，同一个 xml 的 `<enabled-components>` 段里
-     * 也有包名，那样会永远为真，每 5 秒白跑一次 `cmd`（每次都要拉起一个 app_process）。
+     * 守护循环**不判断状态，直接每 2 秒调一次 `cmd package unstop`**。早先的写法是先解析
+     * `/data/system/users/0/package-restrictions.xml` 里 `<stopped-packages>` 那一段再决定
+     * 要不要清——但那份文件在不同版本上的位置/格式都会变，解析不出来就永远不清，反而更脆。
+     * 对没被停用的包，`unstop` 是空操作，实测一次约 0.02 秒，这点开销换来「一定生效」。
      */
     private fun buildStartCommand(): String = buildString {
         append("mkdir -p '").append(SCRIPT_DIR).append("' '").append(SERVICE_D_DIR).append("'\n")
@@ -116,7 +117,8 @@ object DialKeepAlive {
         // 诊断用：放到 /data/local/tmp，adb shell 也能读，出问题不用猜
         append("DBG=/data/local/tmp/bakasu-daemon.log\n")
         append("say() { printf '[%s] %s\\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" \"\$1\" >> \"\$DBG\" 2>/dev/null; }\n")
-        append("say \"started pid=\$\$ cgroup=\$(cat /proc/self/cgroup 2>/dev/null | tr '\\n' ' ')\"\n")
+        // 诊断走 setprop：/data/local/tmp 被 SELinux 拒过，属性通道 adb 一定能读
+        append("setprop debug.bakasu.boot \"pid=\$\$ at \$(date '+%H:%M:%S') cgroup=\$(cat /proc/self/cgroup 2>/dev/null | tr '\\n' ' ')\"\n")
         // ColorOS 划掉 App 用的是自家 o-stop，按 cgroup 杀进程；守护若还挂在 App 的 cgroup 里
         // 会被连坐。这里尽量把自家人挪到系统组，被 SELinux 拦住就记一笔继续跑。
         append("for cg in /sys/fs/cgroup/system /sys/fs/cgroup/system-background; do\n")
@@ -124,21 +126,14 @@ object DialKeepAlive {
         append("    say \"moved to \$cg\"; break\n")
         append("  fi\n")
         append("done\n")
-        append("stopped_now() {\n")
-        append("  [ -f \"\$XML\" ] || return 1\n")
-        append("  sed -n '/<stopped-packages/,/<\\/stopped-packages>/p' \"\$XML\" 2>/dev/null | grep -F -q \"\\\"\$PKG\\\"\"\n")
-        append("}\n")
-        // 循环体第一轮立刻执行，所以「刚开机就拨号」不会撞在窗口里
         append("while true; do\n")
-        append("  if stopped_now; then\n")
-        append("    cmd package unstop \"\$PKG\" --user 0 >/dev/null 2>&1\n")
-        append("    say 'cleared stopped flag'\n")
-        append("    printf '[%s] cleared stopped flag\\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" >> \"\$LOG\"\n")
-        // 日志按 20KB 截一次，免得哪天一直清不掉把 /data 写满
-        append("    if [ \"\$(wc -c < \"\$LOG\" 2>/dev/null || echo 0)\" -gt 20000 ]; then\n")
-        append("      tail -n 100 \"\$LOG\" > \"\$LOG.tmp\" && mv \"\$LOG.tmp\" \"\$LOG\"\n")
-        append("    fi\n")
-        append("  fi\n")
+        // 不再依赖解析 package-restrictions.xml：那玩意儿的格式随版本会变，
+        // 而且 root 侧不一定读得到。`cmd package unstop` 对没被停用的包是空操作，
+        // 直接每 2 秒清一次最稳 —— 实测一次调用约 0.02 秒，代价可以忽略。
+        append("  cmd package unstop \"\$PKG\" --user 0 >/dev/null 2>&1\n")
+        append("  rc=\$?\n")
+        // 诊断走 setprop：adb 一定能读，不像 /data/local/tmp 会被 SELinux 拦
+        append("  setprop debug.bakasu.daemon \"t=\$(date '+%H:%M:%S') rc=\$rc\"\n")
         append("  sleep ").append(INTERVAL).append('\n')
         append("done\n")
         append("SB_KEEPALIVE\n")

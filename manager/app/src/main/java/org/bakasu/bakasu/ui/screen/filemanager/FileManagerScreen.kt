@@ -161,7 +161,11 @@ private class PaneState(initialPath: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileManagerScreen() {
+fun FileManagerScreen(
+    /** 选择模式：点文件就回传路径，不做增删改 */
+    pickMode: Boolean = false,
+    onPicked: ((String) -> Unit)? = null,
+) {
     val navigator = LocalNavigator.current
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -299,7 +303,7 @@ fun FileManagerScreen() {
                 title = {
                     Column {
                         Text(
-                            text = "隐藏终端",
+                            text = if (pickMode) "选择脚本" else "隐藏终端",
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -398,6 +402,23 @@ fun FileManagerScreen() {
                 )
             }
 
+            if (pickMode) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Text(
+                        text = "点一个 .sh 文件即可，内容会填进「要执行的脚本」；目录照常进入，返回键取消。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -412,7 +433,9 @@ fun FileManagerScreen() {
                     onActivate = { activeIndex = 0 },
                     onOpenHeader = { headerPane = left },
                     onNavigate = { target -> navigate(left, target) },
-                    onOpenFile = { actionTarget = it },
+                    onOpenFile = { entry ->
+                        if (pickMode) onPicked?.invoke(entry.path) else actionTarget = entry
+                    },
                 )
                 PaneColumn(
                     pane = right,
@@ -422,22 +445,27 @@ fun FileManagerScreen() {
                     onActivate = { activeIndex = 1 },
                     onOpenHeader = { headerPane = right },
                     onNavigate = { target -> navigate(right, target) },
-                    onOpenFile = { actionTarget = it },
+                    onOpenFile = { entry ->
+                        if (pickMode) onPicked?.invoke(entry.path) else actionTarget = entry
+                    },
                 )
             }
 
             Spacer(Modifier.height(8.dp))
 
-            ActionBar(
-                selectionCount = active.selected.size,
-                destLabel = RootFileRepository.nameOf(other.path),
-                single = active.entries.firstOrNull { it.path in active.selected },
-                onNew = { showTools = true },
-                onCopy = { transfer(cut = false) },
-                onMove = { transfer(cut = true) },
-                onDelete = { requestDelete(active.selected.toList()) },
-                onMore = { active.entries.firstOrNull { it.path in active.selected }?.let { actionTarget = it } },
-            )
+            // 选择模式下没有增删改，底部操作栏会把两栏挤小，直接不显示
+            if (!pickMode) {
+                ActionBar(
+                    selectionCount = active.selected.size,
+                    destLabel = RootFileRepository.nameOf(other.path),
+                    single = active.entries.firstOrNull { it.path in active.selected },
+                    onNew = { showTools = true },
+                    onCopy = { transfer(cut = false) },
+                    onMove = { transfer(cut = true) },
+                    onDelete = { requestDelete(active.selected.toList()) },
+                    onMore = { active.entries.firstOrNull { it.path in active.selected }?.let { actionTarget = it } },
+                )
+            }
 
             Spacer(Modifier.height(8.dp))
         }

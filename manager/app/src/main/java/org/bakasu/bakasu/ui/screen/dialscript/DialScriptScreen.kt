@@ -8,13 +8,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.twotone.Folder
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -27,9 +32,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,15 +49,21 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.data.dial.DialScriptConfig
+import org.bakasu.bakasu.data.dial.ScriptPick
 import org.bakasu.bakasu.data.dial.DialScriptRunner
 import org.bakasu.bakasu.data.dial.DialScriptStore
 import org.bakasu.bakasu.data.dial.readDialLog
 import org.bakasu.bakasu.data.shell.KsuCliRepository
+import org.bakasu.bakasu.data.file.RootFileRepository
 import org.bakasu.bakasu.ui.component.settings.AppBackButton
 import org.bakasu.bakasu.ui.navigation.LocalNavigator
+import org.bakasu.bakasu.ui.navigation.Route
 import org.bakasu.bakasu.ui.util.LocalSnackbarHost
 import org.bakasu.bakasu.ui.util.adaptiveScaffoldWindowInsets
 import org.bakasu.bakasu.ui.util.showReplacingSnackbar
@@ -84,6 +97,39 @@ fun DialScriptScreen() {
     fun update(next: DialScriptConfig) {
         config = next
         store.write(next)
+    }
+
+    val fileRepo = remember(ksuCli) { RootFileRepository(ksuCli) }
+
+    // 从隐藏终端选完回来：把文件内容读进「要执行的脚本」，之后拨号就不再依赖那个文件还在不在
+    val applyPicked = rememberUpdatedState<(String) -> Unit> { path ->
+        scope.launch {
+            val preview = withContext(Dispatchers.IO) {
+                runCatching { fileRepo.readText(path, MAX_BODY_BYTES) }.getOrNull()
+            }
+            val name = path.substringAfterLast('/')
+            when {
+                preview == null -> snackbarHost.showReplacingSnackbar("读取失败：$path")
+                preview.binary -> snackbarHost.showReplacingSnackbar("$name 是二进制文件，当不了脚本")
+                preview.text.isBlank() -> snackbarHost.showReplacingSnackbar("$name 是空的")
+                else -> {
+                    update(config.copy(scriptBody = preview.text, scriptPath = ""))
+                    val cut = if (preview.truncated) "（只取前 ${MAX_BODY_BYTES / 1024} KB）" else ""
+                    snackbarHost.showReplacingSnackbar("已载入 $name$cut")
+                }
+            }
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                ScriptPick.take()?.let { picked -> applyPicked.value(picked) }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(showLog, logReload) {
@@ -185,6 +231,15 @@ fun DialScriptScreen() {
                     multiline = true,
                     multilineHeight = 168.dp,
                 )
+                TextButton(onClick = { navigator.push(Route.ScriptPicker) }) {
+                    Icon(
+                        imageVector = Icons.TwoTone.Folder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("从隐藏终端选择脚本", style = MaterialTheme.typography.labelLarge)
+                }
                 Text(
                     text = "两处填一处就行：只写这里就不需要外部脚本文件；" +
                         "路径和内容都填时以「要执行的脚本」为准。",
@@ -286,6 +341,9 @@ fun DialScriptScreen() {
         )
     }
 }
+
+/** 选中文件后最多搬这么多字节进来，避免把几十 MB 的日志塞进输入框 */
+private const val MAX_BODY_BYTES = 128 * 1024
 
 @Composable
 private fun SectionCard(content: @Composable () -> Unit) {

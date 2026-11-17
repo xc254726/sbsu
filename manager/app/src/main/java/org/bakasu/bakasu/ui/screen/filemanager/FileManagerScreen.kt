@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.twotone.Folder
 import androidx.compose.material.icons.twotone.Info
 import androidx.compose.material.icons.twotone.Lock
 import androidx.compose.material.icons.twotone.MoreVert
+import androidx.compose.material.icons.twotone.PlayArrow
 import androidx.compose.material.icons.twotone.Refresh
 import androidx.compose.material.icons.twotone.Search
 import androidx.compose.material.icons.twotone.Sort
@@ -88,6 +90,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
 import java.io.File
 import java.text.SimpleDateFormat
@@ -99,6 +102,7 @@ import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.data.file.RootFileEntry
 import org.bakasu.bakasu.data.file.RootFileRepository
 import org.bakasu.bakasu.data.file.RootOpResult
+import org.bakasu.bakasu.data.file.ScriptOutput
 import org.bakasu.bakasu.data.file.TextPreview
 import org.bakasu.bakasu.data.shell.KsuCliRepository
 import org.bakasu.bakasu.ui.component.ConfirmResult
@@ -129,6 +133,7 @@ private sealed interface FileDialog {
     data class Chmod(val target: RootFileEntry) : FileDialog
     data class Properties(val target: RootFileEntry) : FileDialog
     data class Preview(val target: RootFileEntry) : FileDialog
+    data class RunScript(val target: RootFileEntry) : FileDialog
     data class Destination(val cut: Boolean) : FileDialog
 }
 
@@ -164,6 +169,8 @@ fun FileManagerScreen() {
     var showTools by remember { mutableStateOf(false) }
     var showSelectionActions by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var scriptRunning by remember { mutableStateOf(false) }
+    var scriptOutput by remember { mutableStateOf<ScriptOutput?>(null) }
 
     LaunchedEffect(Unit) {
         hasRoot = withContext(Dispatchers.IO) { repo.hasRoot() }
@@ -542,6 +549,12 @@ fun FileManagerScreen() {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!target.isDirectory && isScript(target)) {
+                    SheetAction(Icons.TwoTone.PlayArrow, "以 root 运行") {
+                        actionTarget = null
+                        dialog = FileDialog.RunScript(target)
+                    }
+                }
                 if (!target.isDirectory) {
                     SheetAction(Icons.TwoTone.Description, "文本预览") {
                         actionTarget = null
@@ -696,11 +709,100 @@ fun FileManagerScreen() {
             onDismiss = { dialog = null },
         )
 
+        is FileDialog.RunScript -> TextInputDialog(
+            title = "运行脚本",
+            label = "参数（可留空）",
+            initial = "",
+            supporting = "sh ${current.target.name}\n以 root 身份执行，工作目录为脚本所在目录",
+            confirmLabel = "运行",
+            allowEmpty = true,
+            onDismiss = { dialog = null },
+            onConfirm = { args ->
+                dialog = null
+                scope.launch {
+                    scriptRunning = true
+                    val outcome = withContext(Dispatchers.IO) {
+                        runCatching { repo.runScript(current.target.path, args) }
+                    }
+                    scriptRunning = false
+                    outcome.onSuccess { scriptOutput = it }
+                        .onFailure { snackbarHost.showReplacingSnackbar(it.message ?: "执行失败") }
+                }
+            },
+        )
+
         is FileDialog.Preview -> PreviewSheet(
             target = current.target,
             repo = repo,
             onDismiss = { dialog = null },
         )
+    }
+
+    if (scriptRunning) {
+        Dialog(onDismissRequest = {}) {
+            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Text(text = "正在以 root 执行…", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+
+    val result = scriptOutput
+    if (result != null) {
+        Dialog(onDismissRequest = { scriptOutput = null }) {
+            Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "脚本输出", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = if (result.ok) "退出码 0" else "退出码 ${result.exitCode}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (result.ok) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .padding(12.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            text = result.output.ifBlank { "（无输出）" },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(result.output))
+                                toast("输出已复制")
+                            },
+                        ) { Text("复制") }
+                        TextButton(onClick = { scriptOutput = null }) { Text("关闭") }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -862,6 +964,7 @@ private fun TextInputDialog(
     initial: String = "",
     supporting: String? = null,
     confirmLabel: String = "确定",
+    allowEmpty: Boolean = false,
     keyboardType: KeyboardType = KeyboardType.Text,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
@@ -891,7 +994,7 @@ private fun TextInputDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(value) }, enabled = value.isNotBlank()) {
+            TextButton(onClick = { onConfirm(value) }, enabled = allowEmpty || value.isNotBlank()) {
                 Text(confirmLabel)
             }
         },
@@ -1033,6 +1136,14 @@ private fun PreviewSheet(
             }
         }
     }
+}
+
+private fun isScript(entry: RootFileEntry): Boolean {
+    if (entry.isDirectory) return false
+    if (entry.name.endsWith(".sh", ignoreCase = true)) return true
+    // 权限串形如 -rwxr-xr-x，第 2~10 位里的 x 表示可执行
+    val mode = entry.mode
+    return mode.length >= 10 && mode.substring(1, 10).any { it == 'x' }
 }
 
 private fun iconFor(entry: RootFileEntry): ImageVector = when {

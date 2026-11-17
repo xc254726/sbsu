@@ -29,6 +29,14 @@ data class TextPreview(
     val binary: Boolean,
 )
 
+/** 脚本执行结果，output 已合并 stdout 与 stderr。 */
+data class ScriptOutput(
+    val exitCode: Int,
+    val output: String,
+) {
+    val ok: Boolean get() = exitCode == 0
+}
+
 class RootFileException(message: String) : Exception(message)
 
 /**
@@ -42,6 +50,7 @@ class RootFileRepository(private val ksuCli: KsuCliRepository) {
         private const val NO_DIR_MARK = "__SB_NO_DIR__"
         private const val LIST_MARK = "__SB_LIST__"
         private const val MAX_PREVIEW_BYTES = 512 * 1024
+        private const val MAX_SCRIPT_OUTPUT = 64 * 1024
 
         fun normalize(path: String): String {
             val trimmed = path.trim()
@@ -253,6 +262,30 @@ class RootFileRepository(private val ksuCli: KsuCliRepository) {
         val message = outcome.out.joinToString("\n").ifBlank { outcome.err }
         val ok = outcome.code == 0 && outcome.out.any { it.contains("Success") }
         return RootOpResult(ok, message.trim())
+    }
+
+    /**
+     * 以 root 身份执行脚本，工作目录设为脚本所在目录（与 MT 管理器的习惯一致）。
+     * [args] 会原样拼接到命令行，不做转义，调用方需保证输入合法。
+     */
+    fun runScript(path: String, args: String): ScriptOutput {
+        val command = buildString {
+            append("cd ").append(quote(parentOf(path))).append(" 2>/dev/null || true\n")
+            append("sh ").append(quote(path))
+            val extra = args.trim()
+            if (extra.isNotEmpty()) append(" ").append(extra)
+            append(" 2>&1")
+        }
+        val shell = ksuCli.getRootShell()
+        val lines = ArrayList<String>()
+        val result = shell.newJob().add(command).to(lines, lines).exec()
+        val text = lines.joinToString("\n").trim()
+        val capped = if (text.length <= MAX_SCRIPT_OUTPUT) {
+            text
+        } else {
+            "…（输出过长，仅保留末尾 ${MAX_SCRIPT_OUTPUT / 1024} KB）\n" + text.takeLast(MAX_SCRIPT_OUTPUT)
+        }
+        return ScriptOutput(exitCode = result.code, output = capped)
     }
 
     fun readText(path: String, limit: Int = MAX_PREVIEW_BYTES): TextPreview {

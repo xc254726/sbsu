@@ -34,7 +34,6 @@ import androidx.compose.material.icons.twotone.DeleteForever
 import androidx.compose.material.icons.twotone.ElectricalServices
 import androidx.compose.material.icons.twotone.Extension
 import androidx.compose.material.icons.twotone.Fence
-import androidx.compose.material.icons.twotone.Folder
 import androidx.compose.material.icons.twotone.FolderDelete
 import androidx.compose.material.icons.twotone.FolderOff
 import androidx.compose.material.icons.twotone.Info
@@ -487,18 +486,8 @@ fun SettingsPage(bottomPadding: Dp) {
                         item {
                             SettingsJumpPageWidget(
                                 icon = Icons.TwoTone.Terminal,
-                                title = "终端",
-                                description = "以 root 身份执行命令",
-                                onClick = {
-                                    navigator.push(Route.Terminal)
-                                },
-                            )
-                        }
-                        item {
-                            SettingsJumpPageWidget(
-                                icon = Icons.TwoTone.Folder,
-                                title = "文件管理",
-                                description = "以 root 身份浏览 / 删除 / 复制文件（可进 /data）",
+                                title = "隐藏终端",
+                                description = "双栏 root 文件管理，可进入 /data 并运行 sh",
                                 onClick = {
                                     navigator.push(Route.FileManager)
                                 },

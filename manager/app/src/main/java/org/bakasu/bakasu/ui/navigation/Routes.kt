@@ -161,10 +161,6 @@ sealed interface Route :
 
     @Parcelize
     @Serializable
-    data object Terminal : Route
-
-    @Parcelize
-    @Serializable
     data object FileManager : Route
 
     @Parcelize

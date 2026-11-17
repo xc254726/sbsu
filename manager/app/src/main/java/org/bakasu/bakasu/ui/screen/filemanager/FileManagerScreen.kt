@@ -6,6 +6,8 @@ import android.content.Intent
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,12 +32,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.twotone.Add
 import androidx.compose.material.icons.twotone.Android
+import androidx.compose.material.icons.twotone.Check
 import androidx.compose.material.icons.twotone.Close
 import androidx.compose.material.icons.twotone.ContentCopy
 import androidx.compose.material.icons.twotone.ContentCut
@@ -48,15 +52,12 @@ import androidx.compose.material.icons.twotone.Lock
 import androidx.compose.material.icons.twotone.MoreVert
 import androidx.compose.material.icons.twotone.PlayArrow
 import androidx.compose.material.icons.twotone.Refresh
-import androidx.compose.material.icons.twotone.Search
 import androidx.compose.material.icons.twotone.Sort
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -128,13 +129,27 @@ private val QUICK_ACCESS = listOf(
 private sealed interface FileDialog {
     data object NewFolder : FileDialog
     data object NewFile : FileDialog
-    data object GoTo : FileDialog
+    data class GoTo(val pane: PaneState) : FileDialog
     data class Rename(val target: RootFileEntry) : FileDialog
     data class Chmod(val target: RootFileEntry) : FileDialog
     data class Properties(val target: RootFileEntry) : FileDialog
     data class Preview(val target: RootFileEntry) : FileDialog
     data class RunScript(val target: RootFileEntry) : FileDialog
-    data class Destination(val cut: Boolean) : FileDialog
+    data class Destination(val cut: Boolean, val source: List<String>, val from: String) : FileDialog
+}
+
+/** 每一栏各自的浏览状态：路径、条目、选中项都独立。 */
+private class PaneState(initialPath: String) {
+    var path by mutableStateOf(initialPath)
+    var entries by mutableStateOf<List<RootFileEntry>>(emptyList())
+    var loading by mutableStateOf(true)
+    var error by mutableStateOf<String?>(null)
+    var selected by mutableStateOf<Set<String>>(emptySet())
+    var tick by mutableStateOf(0)
+
+    fun toggle(path: String) {
+        selected = if (path in selected) selected - path else selected + path
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -148,27 +163,24 @@ fun FileManagerScreen() {
     val ksuCli = koinInject<KsuCliRepository>()
     val repo = remember(ksuCli) { RootFileRepository(ksuCli) }
     val confirmDialog = rememberConfirmDialog()
-    val timeFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
-    var currentPath by remember { mutableStateOf("/") }
-    var entries by remember { mutableStateOf(emptyList<RootFileEntry>()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var loadError by remember { mutableStateOf<String?>(null) }
+    val left = remember { PaneState("/") }
+    val right = remember { PaneState("/sdcard") }
+    var activeIndex by remember { mutableStateOf(0) }
+    val panes = listOf(left, right)
+    val active = panes[activeIndex]
+    val other = panes[1 - activeIndex]
+
     var hasRoot by remember { mutableStateOf(true) }
-    var refreshTick by remember { mutableStateOf(0) }
-
-    var query by remember { mutableStateOf("") }
-    var searching by remember { mutableStateOf(false) }
     var showHidden by remember { mutableStateOf(true) }
     var sortMode by remember { mutableStateOf(0) }
     var ascending by remember { mutableStateOf(true) }
 
-    var selected by remember { mutableStateOf(emptySet<String>()) }
     var actionTarget by remember { mutableStateOf<RootFileEntry?>(null) }
     var dialog by remember { mutableStateOf<FileDialog?>(null) }
     var showTools by remember { mutableStateOf(false) }
-    var showSelectionActions by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var headerPane by remember { mutableStateOf<PaneState?>(null) }
     var scriptRunning by remember { mutableStateOf(false) }
     var scriptOutput by remember { mutableStateOf<ScriptOutput?>(null) }
 
@@ -176,35 +188,42 @@ fun FileManagerScreen() {
         hasRoot = withContext(Dispatchers.IO) { repo.hasRoot() }
     }
 
-    LaunchedEffect(currentPath, refreshTick) {
-        isLoading = true
-        loadError = null
-        val result = withContext(Dispatchers.IO) { runCatching { repo.list(currentPath) } }
-        result.onSuccess { entries = it }
-            .onFailure {
-                entries = emptyList()
-                loadError = it.message ?: "读取失败"
-            }
-        isLoading = false
-    }
-
-    fun navigateTo(target: String) {
-        val normalized = RootFileRepository.normalize(target)
-        selected = emptySet()
-        query = ""
-        searching = false
-        if (normalized == currentPath) {
-            refreshTick++
-        } else {
-            currentPath = normalized
+    panes.forEach { pane ->
+        LaunchedEffect(pane.path, pane.tick) {
+            pane.loading = true
+            pane.error = null
+            val result = withContext(Dispatchers.IO) { runCatching { repo.list(pane.path) } }
+            result.onSuccess { pane.entries = it }
+                .onFailure {
+                    pane.entries = emptyList()
+                    pane.error = it.message ?: "读取失败"
+                }
+            pane.loading = false
         }
     }
 
-    fun goUp() {
-        if (currentPath == "/") {
-            navigator.pop()
+    val leftVisible = remember(left.entries, showHidden, sortMode, ascending) {
+        computeVisible(left.entries, showHidden, sortMode, ascending)
+    }
+    val rightVisible = remember(right.entries, showHidden, sortMode, ascending) {
+        computeVisible(right.entries, showHidden, sortMode, ascending)
+    }
+
+    fun navigate(pane: PaneState, target: String) {
+        val normalized = RootFileRepository.normalize(target)
+        pane.selected = emptySet()
+        if (normalized == pane.path) {
+            pane.tick++
         } else {
-            navigateTo(RootFileRepository.parentOf(currentPath))
+            pane.path = normalized
+        }
+    }
+
+    fun back() {
+        when {
+            active.selected.isNotEmpty() -> active.selected = emptySet()
+            active.path != "/" -> navigate(active, RootFileRepository.parentOf(active.path))
+            else -> navigator.pop()
         }
     }
 
@@ -216,11 +235,13 @@ fun FileManagerScreen() {
                 snackbarHost.showReplacingSnackbar(outcome.exceptionOrNull()?.message ?: "操作失败")
 
             result.ok -> {
-                selected = emptySet()
+                left.selected = emptySet()
+                right.selected = emptySet()
                 dialog = null
                 actionTarget = null
                 snackbarHost.showReplacingSnackbar(okMessage)
-                refreshTick++
+                left.tick++
+                right.tick++
             }
 
             else -> snackbarHost.showReplacingSnackbar(result.message.ifBlank { "操作失败" })
@@ -245,134 +266,110 @@ fun FileManagerScreen() {
         }
     }
 
+    fun transfer(cut: Boolean) {
+        val paths = active.selected.toList()
+        if (paths.isEmpty()) return
+        val dest = other.path
+        val destName = RootFileRepository.nameOf(dest)
+        scope.launch {
+            if (cut) {
+                perform("已移动到 $destName") { repo.move(paths, dest) }
+            } else {
+                perform("已复制到 $destName") { repo.copy(paths, dest) }
+            }
+        }
+    }
+
     fun toast(message: String) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
-    BackHandler(enabled = selected.isNotEmpty() || currentPath != "/") {
-        if (selected.isNotEmpty()) {
-            selected = emptySet()
-        } else {
-            navigateTo(RootFileRepository.parentOf(currentPath))
-        }
-    }
-
-    val visible = remember(entries, query, showHidden, sortMode, ascending) {
-        val filtered = entries.filter { entry ->
-            (showHidden || !entry.isHidden) &&
-                (query.isBlank() || entry.name.contains(query, ignoreCase = true))
-        }
-        val comparator = when (sortMode) {
-            1 -> compareBy<RootFileEntry> { if (it.size < 0) Long.MAX_VALUE else it.size }
-            2 -> compareBy<RootFileEntry> { it.modifiedSeconds }
-            else -> compareBy<RootFileEntry> { it.name.lowercase(Locale.ROOT) }
-        }
-        val ordered = if (ascending) comparator else comparator.reversed()
-        filtered.sortedWith(
-            compareByDescending<RootFileEntry> { it.isDirectory }.then(ordered),
-        )
-    }
+    BackHandler(enabled = true) { back() }
 
     Scaffold(
         contentWindowInsets = adaptiveScaffoldWindowInsets(),
         topBar = {
-            if (selected.isNotEmpty()) {
-                TopAppBar(
-                    title = { Text("已选择 ${selected.size} 项") },
-                    navigationIcon = {
-                        AppBackButton(onClick = { selected = emptySet() })
-                    },
-                    actions = {
-                        TextButton(onClick = { selected = entries.map { it.path }.toSet() }) {
-                            Text("全选")
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = "隐藏终端",
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = active.path,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
+                navigationIcon = { AppBackButton(onClick = { back() }) },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            val moved = left.path
+                            left.path = right.path
+                            right.path = moved
+                            left.selected = emptySet()
+                            right.selected = emptySet()
+                        },
+                    ) {
+                        Text(text = "⇄", fontSize = 19.sp)
+                    }
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.TwoTone.MoreVert, contentDescription = "菜单")
                         }
-                        IconButton(onClick = { showSelectionActions = true }) {
-                            Icon(Icons.TwoTone.MoreVert, contentDescription = "更多操作")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    ),
-                    windowInsets = TopAppBarDefaults.windowInsets.add(WindowInsets(left = 6.dp)),
-                )
-            } else {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                text = RootFileRepository.nameOf(currentPath),
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (sortMode == 0) "按名称 ✓" else "按名称") },
+                                onClick = { sortMode = 0; showMenu = false },
                             )
-                            Text(
-                                text = currentPath,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                            DropdownMenuItem(
+                                text = { Text(if (sortMode == 1) "按大小 ✓" else "按大小") },
+                                onClick = { sortMode = 1; showMenu = false },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (sortMode == 2) "按时间 ✓" else "按时间") },
+                                onClick = { sortMode = 2; showMenu = false },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (ascending) "倒序排列" else "正序排列") },
+                                onClick = { ascending = !ascending; showMenu = false },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (showHidden) "隐藏以 . 开头的文件" else "显示隐藏文件") },
+                                onClick = { showHidden = !showHidden; showMenu = false },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("全选本栏") },
+                                onClick = {
+                                    showMenu = false
+                                    active.selected = active.entries.map { it.path }.toSet()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("前往路径…") },
+                                onClick = { showMenu = false; dialog = FileDialog.GoTo(active) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("刷新两栏") },
+                                onClick = { showMenu = false; left.tick++; right.tick++ },
                             )
                         }
-                    },
-                    navigationIcon = { AppBackButton(onClick = { goUp() }) },
-                    actions = {
-                        IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
-                            Icon(
-                                imageVector = if (searching) Icons.TwoTone.Close else Icons.TwoTone.Search,
-                                contentDescription = "搜索",
-                            )
-                        }
-                        Box {
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.TwoTone.MoreVert, contentDescription = "菜单")
-                            }
-                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text(if (sortMode == 0) "按名称 ✓" else "按名称") },
-                                    onClick = { sortMode = 0; showMenu = false },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(if (sortMode == 1) "按大小 ✓" else "按大小") },
-                                    onClick = { sortMode = 1; showMenu = false },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(if (sortMode == 2) "按时间 ✓" else "按时间") },
-                                    onClick = { sortMode = 2; showMenu = false },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(if (ascending) "倒序排列" else "正序排列") },
-                                    onClick = { ascending = !ascending; showMenu = false },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(if (showHidden) "隐藏以 . 开头的文件" else "显示隐藏文件") },
-                                    onClick = { showHidden = !showHidden; showMenu = false },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("前往路径…") },
-                                    onClick = { showMenu = false; dialog = FileDialog.GoTo },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("刷新") },
-                                    onClick = { showMenu = false; refreshTick++ },
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    ),
-                    windowInsets = TopAppBarDefaults.windowInsets.add(WindowInsets(left = 6.dp)),
-                )
-            }
-        },
-        floatingActionButton = {
-            if (selected.isEmpty()) {
-                FloatingActionButton(onClick = { showTools = true }) {
-                    Icon(Icons.TwoTone.Add, contentDescription = "新建")
-                }
-            }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                ),
+                windowInsets = TopAppBarDefaults.windowInsets.add(WindowInsets(left = 6.dp)),
+            )
         },
         snackbarHost = { SwipeableSnackbarHost(hostState = snackbarHost) },
         containerColor = Color.Transparent,
@@ -381,35 +378,9 @@ fun FileManagerScreen() {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = innerPadding.calculateTopPadding())
-                .padding(bottom = innerPadding.calculateBottomPadding())
-                .padding(horizontal = 12.dp),
+                .padding(innerPadding)
+                .padding(horizontal = 10.dp),
         ) {
-            PathBar(path = currentPath, onJump = { navigateTo(it) })
-
-            if (searching) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    singleLine = true,
-                    placeholder = { Text("在当前目录中筛选") },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) {
-                                Icon(Icons.TwoTone.Close, contentDescription = "清除")
-                            }
-                        }
-                    },
-                )
-            }
-
-            if (currentPath == "/") {
-                QuickAccessRow(onJump = { navigateTo(it) })
-            }
-
             if (!hasRoot) {
                 WarningCard(
                     modifier = Modifier
@@ -421,91 +392,48 @@ fun FileManagerScreen() {
                 )
             }
 
-            Box(modifier = Modifier.weight(1f)) {
-                when {
-                    isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-
-                    loadError != null -> Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        WarningCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            message = loadError ?: "",
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.errorContainer,
-                        )
-                        TextButton(onClick = { refreshTick++ }) { Text("重试") }
-                    }
-
-                    visible.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = if (query.isNotBlank()) "没有匹配的文件" else "此目录为空",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-
-                    else -> LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 88.dp),
-                    ) {
-                        items(items = visible, key = { it.path }) { entry ->
-                            FileRow(
-                                entry = entry,
-                                selected = entry.path in selected,
-                                selecting = selected.isNotEmpty(),
-                                timeFormat = timeFormat,
-                                onClick = {
-                                    when {
-                                        selected.isNotEmpty() -> {
-                                            selected = if (entry.path in selected) {
-                                                selected - entry.path
-                                            } else {
-                                                selected + entry.path
-                                            }
-                                        }
-
-                                        entry.isDirectory -> navigateTo(entry.path)
-                                        else -> actionTarget = entry
-                                    }
-                                },
-                                onLongClick = {
-                                    selected = if (entry.path in selected) {
-                                        selected - entry.path
-                                    } else {
-                                        selected + entry.path
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = "共 ${visible.size} 项 · 长按多选",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                PaneColumn(
+                    pane = left,
+                    entries = leftVisible,
+                    active = activeIndex == 0,
+                    modifier = Modifier.weight(1f),
+                    onActivate = { activeIndex = 0 },
+                    onOpenHeader = { headerPane = left },
+                    onNavigate = { target -> navigate(left, target) },
+                    onOpenFile = { actionTarget = it },
                 )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = if (hasRoot) "· root 权限" else "· 无 root 权限",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (hasRoot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                PaneColumn(
+                    pane = right,
+                    entries = rightVisible,
+                    active = activeIndex == 1,
+                    modifier = Modifier.weight(1f),
+                    onActivate = { activeIndex = 1 },
+                    onOpenHeader = { headerPane = right },
+                    onNavigate = { target -> navigate(right, target) },
+                    onOpenFile = { actionTarget = it },
                 )
             }
+
+            Spacer(Modifier.height(8.dp))
+
+            ActionBar(
+                selectionCount = active.selected.size,
+                destLabel = RootFileRepository.nameOf(other.path),
+                single = active.entries.firstOrNull { it.path in active.selected },
+                onNew = { showTools = true },
+                onCopy = { transfer(cut = false) },
+                onMove = { transfer(cut = true) },
+                onDelete = { requestDelete(active.selected.toList()) },
+                onMore = { active.entries.firstOrNull { it.path in active.selected }?.let { actionTarget = it } },
+            )
+
+            Spacer(Modifier.height(8.dp))
         }
     }
 
@@ -515,6 +443,11 @@ fun FileManagerScreen() {
             sheetState = rememberModalBottomSheetState(),
         ) {
             Column(modifier = Modifier.padding(bottom = 24.dp)) {
+                Text(
+                    text = "在 ${RootFileRepository.nameOf(active.path)} 中新建",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                )
                 SheetAction(Icons.TwoTone.Folder, "新建文件夹") {
                     showTools = false
                     dialog = FileDialog.NewFolder
@@ -525,11 +458,59 @@ fun FileManagerScreen() {
                 }
                 SheetAction(Icons.TwoTone.Sort, "前往路径…") {
                     showTools = false
-                    dialog = FileDialog.GoTo
+                    dialog = FileDialog.GoTo(active)
                 }
-                SheetAction(Icons.TwoTone.Refresh, "刷新") {
+                SheetAction(Icons.TwoTone.Refresh, "刷新两栏") {
                     showTools = false
-                    refreshTick++
+                    left.tick++
+                    right.tick++
+                }
+            }
+        }
+    }
+
+    val sheetPane = headerPane
+    if (sheetPane != null) {
+        ModalBottomSheet(
+            onDismissRequest = { headerPane = null },
+            sheetState = rememberModalBottomSheetState(),
+        ) {
+            Column(modifier = Modifier.padding(bottom = 24.dp)) {
+                Text(
+                    text = if (sheetPane === active) "当前栏" else "另一栏",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+                Text(
+                    text = sheetPane.path,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(8.dp))
+                QuickAccessRow { target ->
+                    activeIndex = if (sheetPane === left) 0 else 1
+                    navigate(sheetPane, target)
+                    headerPane = null
+                }
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+                SheetAction(Icons.TwoTone.Folder, "前往路径…") {
+                    headerPane = null
+                    dialog = FileDialog.GoTo(sheetPane)
+                }
+                SheetAction(Icons.TwoTone.Refresh, "刷新本栏") {
+                    headerPane = null
+                    sheetPane.tick++
+                }
+                SheetAction(Icons.TwoTone.Close, "取消本栏选择", enabled = sheetPane.selected.isNotEmpty()) {
+                    headerPane = null
+                    sheetPane.selected = emptySet()
                 }
             }
         }
@@ -572,6 +553,18 @@ fun FileManagerScreen() {
                         actionTarget = null
                     }
                 }
+                SheetAction(Icons.TwoTone.ContentCopy, "复制到另一栏 ${RootFileRepository.nameOf(other.path)}") {
+                    actionTarget = null
+                    scope.launch {
+                        perform("已复制") { repo.copy(listOf(target.path), other.path) }
+                    }
+                }
+                SheetAction(Icons.TwoTone.ContentCut, "移动到另一栏 ${RootFileRepository.nameOf(other.path)}") {
+                    actionTarget = null
+                    scope.launch {
+                        perform("已移动") { repo.move(listOf(target.path), other.path) }
+                    }
+                }
                 SheetAction(Icons.TwoTone.ContentCopy, "复制路径") {
                     clipboard.setText(AnnotatedString(target.path))
                     actionTarget = null
@@ -596,72 +589,38 @@ fun FileManagerScreen() {
         }
     }
 
-    if (showSelectionActions) {
-        ModalBottomSheet(
-            onDismissRequest = { showSelectionActions = false },
-            sheetState = rememberModalBottomSheetState(),
-        ) {
-            val paths = selected.toList()
-            Column(modifier = Modifier.padding(bottom = 24.dp)) {
-                Text(
-                    text = "已选择 ${paths.size} 项",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                )
-                SheetAction(Icons.TwoTone.ContentCopy, "复制到…") {
-                    showSelectionActions = false
-                    dialog = FileDialog.Destination(cut = false)
-                }
-                SheetAction(Icons.TwoTone.ContentCut, "移动到…") {
-                    showSelectionActions = false
-                    dialog = FileDialog.Destination(cut = true)
-                }
-                if (paths.size == 1) {
-                    val only = entries.firstOrNull { it.path == paths.first() }
-                    if (only != null) {
-                        SheetAction(Icons.TwoTone.Edit, "重命名") {
-                            showSelectionActions = false
-                            dialog = FileDialog.Rename(only)
-                        }
-                    }
-                }
-                SheetAction(Icons.TwoTone.Delete, "删除", danger = true) {
-                    showSelectionActions = false
-                    requestDelete(paths)
-                }
-            }
-        }
-    }
-
     when (val current = dialog) {
         null -> Unit
 
         FileDialog.NewFolder -> TextInputDialog(
             title = "新建文件夹",
             label = "文件夹名称",
+            supporting = active.path,
             onDismiss = { dialog = null },
             onConfirm = { name ->
-                scope.launch { perform("已创建") { repo.createDirectory(currentPath, name) } }
+                scope.launch { perform("已创建") { repo.createDirectory(active.path, name) } }
             },
         )
 
         FileDialog.NewFile -> TextInputDialog(
             title = "新建文件",
             label = "文件名称",
+            supporting = active.path,
             onDismiss = { dialog = null },
             onConfirm = { name ->
-                scope.launch { perform("已创建") { repo.createFile(currentPath, name) } }
+                scope.launch { perform("已创建") { repo.createFile(active.path, name) } }
             },
         )
 
-        FileDialog.GoTo -> TextInputDialog(
+        is FileDialog.GoTo -> TextInputDialog(
             title = "前往路径",
             label = "绝对路径",
-            initial = currentPath,
+            initial = current.pane.path,
             onDismiss = { dialog = null },
             onConfirm = { path ->
                 dialog = null
-                navigateTo(path)
+                activeIndex = if (current.pane === left) 0 else 1
+                navigate(current.pane, path)
             },
         )
 
@@ -691,11 +650,11 @@ fun FileManagerScreen() {
         is FileDialog.Destination -> TextInputDialog(
             title = if (current.cut) "移动到" else "复制到",
             label = "目标目录",
-            initial = currentPath,
-            supporting = "将处理 ${selected.size} 项",
+            initial = current.from,
+            supporting = "将处理 ${current.source.size} 项",
             onDismiss = { dialog = null },
             onConfirm = { dest ->
-                val paths = selected.toList()
+                val paths = current.source
                 if (current.cut) {
                     scope.launch { perform("已移动") { repo.move(paths, dest) } }
                 } else {
@@ -807,47 +766,326 @@ fun FileManagerScreen() {
 }
 
 @Composable
-private fun PathBar(path: String, onJump: (String) -> Unit) {
-    val segments = remember(path) {
-        val result = ArrayList<Pair<String, String>>()
-        var acc = ""
-        RootFileRepository.segments(path).forEach { segment ->
-            acc = "$acc/$segment"
-            result.add(acc to segment)
+private fun PaneColumn(
+    pane: PaneState,
+    entries: List<RootFileEntry>,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+    onActivate: () -> Unit,
+    onOpenHeader: () -> Unit,
+    onNavigate: (String) -> Unit,
+    onOpenFile: (RootFileEntry) -> Unit,
+) {
+    val background by animateColorAsState(
+        targetValue = if (active) {
+            MaterialTheme.colorScheme.surfaceContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        label = "paneBackground",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (active) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        } else {
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        },
+        label = "paneBorder",
+    )
+
+    Surface(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(18.dp),
+        color = background,
+        border = BorderStroke(if (active) 1.5.dp else 1.dp, borderColor),
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        onActivate()
+                        onOpenHeader()
+                    }
+                    .padding(start = 10.dp, end = 8.dp, top = 9.dp, bottom = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.TwoTone.Folder,
+                    contentDescription = null,
+                    tint = if (active) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = RootFileRepository.nameOf(pane.path),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = pane.path,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (pane.selected.isNotEmpty()) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ) {
+                        Text(
+                            text = pane.selected.size.toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = if (entries.size > 999) "999+" else entries.size.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            HorizontalDivider(color = borderColor.copy(alpha = 0.5f), thickness = 0.7.dp)
+
+            Box(modifier = Modifier.weight(1f)) {
+                val error = pane.error
+                when {
+                    pane.loading -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    }
+
+                    error != null -> Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        TextButton(onClick = { pane.tick++ }) { Text("重试") }
+                    }
+
+                    entries.isEmpty() -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "空目录",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    else -> LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 3.dp),
+                    ) {
+                        items(items = entries, key = { it.path }) { entry ->
+                            PaneRow(
+                                entry = entry,
+                                selected = entry.path in pane.selected,
+                                selecting = pane.selected.isNotEmpty(),
+                                onClick = {
+                                    onActivate()
+                                    when {
+                                        pane.selected.isNotEmpty() -> pane.toggle(entry.path)
+                                        entry.isDirectory -> {
+                                            pane.selected = emptySet()
+                                            onNavigate(entry.path)
+                                        }
+
+                                        else -> onOpenFile(entry)
+                                    }
+                                },
+                                onLongClick = {
+                                    onActivate()
+                                    pane.toggle(entry.path)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
         }
-        result
     }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PaneRow(
+    entry: RootFileEntry,
+    selected: Boolean,
+    selecting: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(vertical = 6.dp),
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                } else {
+                    Color.Transparent
+                },
+            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(start = 8.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PathChip(text = "/", active = segments.isEmpty(), onClick = { onJump("/") })
-        segments.forEach { (target, name) ->
+        Icon(
+            imageVector = iconFor(entry),
+            contentDescription = null,
+            tint = iconTintOf(entry),
+            modifier = Modifier.size(17.dp),
+        )
+        Spacer(Modifier.width(7.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "›",
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                style = MaterialTheme.typography.labelLarge,
+                text = entry.name,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
             )
-            PathChip(text = name, active = false, onClick = { onJump(target) })
+            Text(
+                text = subtitleOf(entry),
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (selecting && selected) {
+            Icon(
+                imageVector = Icons.TwoTone.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(13.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun PathChip(text: String, active: Boolean, onClick: () -> Unit) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        maxLines = 1,
+private fun ActionBar(
+    selectionCount: Int,
+    destLabel: String,
+    single: RootFileEntry?,
+    onNew: () -> Unit,
+    onCopy: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+    onMore: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column {
+            if (selectionCount > 0) {
+                Text(
+                    text = "已选 $selectionCount 项 · 目标栏 $destLabel",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 14.dp, top = 8.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                BarAction(Icons.TwoTone.Add, "新建", enabled = true, onClick = onNew)
+                BarAction(
+                    Icons.TwoTone.ContentCopy,
+                    "复制",
+                    enabled = selectionCount > 0,
+                    onClick = onCopy,
+                )
+                BarAction(
+                    Icons.TwoTone.ContentCut,
+                    "移动",
+                    enabled = selectionCount > 0,
+                    onClick = onMove,
+                )
+                BarAction(
+                    Icons.TwoTone.Delete,
+                    "删除",
+                    enabled = selectionCount > 0,
+                    danger = true,
+                    onClick = onDelete,
+                )
+                BarAction(
+                    Icons.TwoTone.MoreVert,
+                    "更多",
+                    enabled = selectionCount > 0 || single != null,
+                    onClick = onMore,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarAction(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val color = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+        danger -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-    )
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = color, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.height(2.dp))
+        Text(text = label, fontSize = 10.sp, color = color)
+    }
 }
 
 @Composable
@@ -856,7 +1094,7 @@ private fun QuickAccessRow(onJump: (String) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(bottom = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         QUICK_ACCESS.forEach { (target, label) ->
@@ -873,61 +1111,6 @@ private fun QuickAccessRow(onJump: (String) -> Unit) {
                 )
             }
         }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun FileRow(
-    entry: RootFileEntry,
-    selected: Boolean,
-    selecting: Boolean,
-    timeFormat: SimpleDateFormat,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                )
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = iconFor(entry),
-                contentDescription = null,
-                tint = when {
-                    entry.isDirectory -> MaterialTheme.colorScheme.primary
-                    entry.name.endsWith(".apk", ignoreCase = true) -> MaterialTheme.colorScheme.tertiary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.size(22.dp),
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = metaOf(entry, timeFormat),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (selecting) {
-                Checkbox(checked = selected, onCheckedChange = { onClick() })
-            }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
     }
 }
 
@@ -1138,6 +1321,24 @@ private fun PreviewSheet(
     }
 }
 
+private fun computeVisible(
+    entries: List<RootFileEntry>,
+    showHidden: Boolean,
+    sortMode: Int,
+    ascending: Boolean,
+): List<RootFileEntry> {
+    val filtered = entries.filter { showHidden || !it.isHidden }
+    val comparator = when (sortMode) {
+        1 -> compareBy<RootFileEntry> { if (it.size < 0) Long.MAX_VALUE else it.size }
+        2 -> compareBy<RootFileEntry> { it.modifiedSeconds }
+        else -> compareBy<RootFileEntry> { it.name.lowercase(Locale.ROOT) }
+    }
+    val ordered = if (ascending) comparator else comparator.reversed()
+    return filtered.sortedWith(
+        compareByDescending<RootFileEntry> { it.isDirectory }.then(ordered),
+    )
+}
+
 private fun isScript(entry: RootFileEntry): Boolean {
     if (entry.isDirectory) return false
     if (entry.name.endsWith(".sh", ignoreCase = true)) return true
@@ -1149,16 +1350,26 @@ private fun isScript(entry: RootFileEntry): Boolean {
 private fun iconFor(entry: RootFileEntry): ImageVector = when {
     entry.isDirectory -> Icons.TwoTone.Folder
     entry.name.endsWith(".apk", ignoreCase = true) -> Icons.TwoTone.Android
+    isScript(entry) -> Icons.TwoTone.PlayArrow
     else -> Icons.TwoTone.Description
 }
 
-private fun metaOf(entry: RootFileEntry, timeFormat: SimpleDateFormat): String {
-    val parts = ArrayList<String>(3)
-    if (entry.isSymlink) parts.add("链接")
-    parts.add(if (entry.isDirectory) "目录" else formatSize(entry.size))
-    if (entry.modifiedSeconds > 0) parts.add(timeFormat.format(Date(entry.modifiedSeconds * 1000L)))
-    if (entry.mode.isNotBlank()) parts.add(entry.mode)
-    return parts.joinToString(" · ")
+@Composable
+private fun iconTintOf(entry: RootFileEntry): Color {
+    val scheme = MaterialTheme.colorScheme
+    return when {
+        entry.isDirectory -> scheme.primary
+        entry.name.endsWith(".apk", ignoreCase = true) -> scheme.tertiary
+        isScript(entry) -> scheme.secondary
+        entry.isSymlink -> scheme.onSurfaceVariant.copy(alpha = 0.8f)
+        else -> scheme.onSurfaceVariant
+    }
+}
+
+private fun subtitleOf(entry: RootFileEntry): String = when {
+    entry.isDirectory -> "目录"
+    entry.isSymlink -> "链接 · ${formatSize(entry.size)}"
+    else -> formatSize(entry.size)
 }
 
 private fun modeToOctal(mode: String): String? {
@@ -1206,10 +1417,10 @@ private fun openWith(context: Context, entry: RootFileEntry) {
             setDataAndType(uri, mimeOf(entry.name))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "打开方式"))
-    } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, "没有应用可以打开此文件", Toast.LENGTH_SHORT).show()
-    } catch (e: IllegalArgumentException) {
-        Toast.makeText(context, "无法打开：${e.message}", Toast.LENGTH_SHORT).show()
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "没有可以打开该文件的应用", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, e.message ?: "打开失败", Toast.LENGTH_SHORT).show()
     }
 }

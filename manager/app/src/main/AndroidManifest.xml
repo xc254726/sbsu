@@ -173,11 +173,13 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- 拨号守护：前台服务把进程钉住，划掉后台时 ColorOS 不会 o-stop 本包，
-             静态广播接收器才能一直被投递 -->
+        <!-- 拨号守护：把进程钉在内存里。划掉后台时 ColorOS 的 o-stop 连前台服务一起杀，
+             所以被杀之后由 root 守护每 2 秒用 am start-service 把它拉回来，
+             这样拨号盘的 SECRET_CODE 永远有进程可投。
+             exported 是为了让 root 侧的 am 一定能启动它（服务本身无副作用）。 -->
         <service
             android:name=".data.dial.DialGuardService"
-            android:exported="false"
+            android:exported="true"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"

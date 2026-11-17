@@ -41,15 +41,10 @@ object DialKeepAlive {
     /** 轮询间隔（秒）。2 秒是可靠性优先：划掉后台后最多等 2 秒；读的是一个小文件，开销可以接受 */
     private const val INTERVAL = 2
 
-    /**
-     * 匹配守护进程的模式。
-     *
-     * 中间的方括号是关键：`pgrep -f` 是按「完整命令行」匹配的，而执行 pgrep 的那个
-     * shell 命令行里就带着这段文字，用原字符串会匹配到它自己 —— 于是永远判定
-     * 「已经在跑」，守护一次都起不来。写成 `[k]eepalive` 后，正则能匹配真实进程
-     * （`sh /data/adb/bakasu/keepalive.sh`），却匹配不到写着 `[k]eepalive` 的这个 shell。
-     */
-    private const val MARKER = "bakasu/[k]eepalive.sh"
+    private const val PID_PATH = "$SCRIPT_DIR/keepalive.pid"
+
+    /** 拉活进程用的组件名：applicationId / 完整 Java 类名（两者不同，不能简写成 .data.dial.X） */
+    private const val COMPONENT = "$PACKAGE/org.bakasu.bakasu.data.dial.DialGuardService"
 
     /** 守护的真实状态：在不在跑、开机自启装了没。两者都成立才算「重启后也管用」。 */
     data class Status(val running: Boolean, val autostart: Boolean)
@@ -57,15 +52,16 @@ object DialKeepAlive {
     /**
      * 查一次状态。
      *
-     * 用 [MARKER] 那个带方括号的模式匹配，避免 pgrep 匹配到执行它的 shell 自己
-     * （见 MARKER 的注释）—— 否则这里会永远报「运行中」，把人骗得很惨。
+     * 靠 pid 文件 + `kill -0` 判断活着，不用 `pgrep -f`：按命令行匹配时，执行 pgrep 的
+     * 那个 shell 自身命令行里也带着脚本路径，会永远匹配到自己，把状态骗成「运行中」。
      * 开机脚本单独看文件在不在：KSU 升级、用户清理 /data/adb 都可能把它弄丢，
      * 那时候守护还在跑、但重启后就没了，得能看出来。
      */
     fun status(ksuCli: KsuCliRepository): Status {
         val lines = exec(
             ksuCli,
-            "pgrep -f '$MARKER' >/dev/null 2>&1 && echo sb-running || echo sb-idle; " +
+            "if [ -f '$PID_PATH' ] && kill -0 \"\$(cat '$PID_PATH')\" 2>/dev/null; " +
+                "then echo sb-running; else echo sb-idle; fi; " +
                 "[ -f '$SERVICE_D_PATH' ] && echo sb-auto || echo sb-noauto",
         ).map { it.trim() }
         return Status(
@@ -84,7 +80,11 @@ object DialKeepAlive {
 
     /** 停守护，并把开机自启一起摘掉。返回 null 表示成功。 */
     fun stop(ksuCli: KsuCliRepository): String? = runCatching {
-        exec(ksuCli, "pkill -f '$MARKER' >/dev/null 2>&1; rm -f '$SERVICE_D_PATH'; true")
+        exec(
+            ksuCli,
+            "if [ -f '$PID_PATH' ]; then kill \"\$(cat '$PID_PATH')\" >/dev/null 2>&1; " +
+                "rm -f '$PID_PATH'; fi; rm -f '$SERVICE_D_PATH'; true",
+        )
         null
     }.getOrElse { error ->
         "停止守护失败：${error.message ?: error.javaClass.simpleName}"
@@ -119,6 +119,9 @@ object DialKeepAlive {
         append("say() { printf '[%s] %s\\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" \"\$1\" >> \"\$DBG\" 2>/dev/null; }\n")
         // 诊断走 setprop：/data/local/tmp 被 SELinux 拒过，属性通道 adb 一定能读
         append("setprop debug.bakasu.boot \"pid=\$\$ at \$(date '+%H:%M:%S') cgroup=\$(cat /proc/self/cgroup 2>/dev/null | tr '\\n' ' ')\"\n")
+        // 记 pid：重启/停止都按 pid 来，不靠 pkill -f 匹配 —— 执行命令的那个 shell
+        // 命令行里本身就带着脚本路径，按名字杀会把自己一起干掉
+        append("echo \$\$ > \"").append(PID_PATH).append("\"\n")
         // ColorOS 划掉 App 用的是自家 o-stop，按 cgroup 杀进程；守护若还挂在 App 的 cgroup 里
         // 会被连坐。这里尽量把自家人挪到系统组，被 SELinux 拦住就记一笔继续跑。
         append("for cg in /sys/fs/cgroup/system /sys/fs/cgroup/system-background; do\n")
@@ -132,8 +135,14 @@ object DialKeepAlive {
         // 直接每 2 秒清一次最稳 —— 实测一次调用约 0.02 秒，代价可以忽略。
         append("  cmd package unstop \"\$PKG\" --user 0 >/dev/null 2>&1\n")
         append("  rc=\$?\n")
-        // 诊断走 setprop：adb 一定能读，不像 /data/local/tmp 会被 SELinux 拦
         append("  setprop debug.bakasu.daemon \"t=\$(date '+%H:%M:%S') rc=\$rc\"\n")
+        // 进程被 o-stop 杀掉之后，光清 stopped 还不够：系统仍然不肯为一个"刚被划掉"的包
+        // 冷启动进程来接广播。所以直接在 root 侧把它拉回来 —— 这就是用户验证过
+        // 「挂着后台就能拨」的那个状态。am 用完整组件名：appId / Java 包名。
+        append("  if ! pidof \"\$PKG\" >/dev/null 2>&1; then\n")
+        append("    am start-service -n \"").append(COMPONENT).append("\" >/dev/null 2>&1\n")
+        append("    setprop debug.bakasu.revive \"t=\$(date '+%H:%M:%S') rc=\$?\"\n")
+        append("  fi\n")
         append("  sleep ").append(INTERVAL).append('\n')
         append("done\n")
         append("SB_KEEPALIVE\n")
@@ -162,8 +171,11 @@ object DialKeepAlive {
         append("cmd appops set ").append(PACKAGE).append(" RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1\n")
         append("cmd appops set ").append(PACKAGE).append(" START_FOREGROUND allow >/dev/null 2>&1\n")
         append("am set-standby-bucket ").append(PACKAGE).append(" active >/dev/null 2>&1\n")
-        // 已经在跑就不再起第二个（两个循环会互相叠加，纯粹浪费电）
-        append("pgrep -f '").append(MARKER).append("' >/dev/null 2>&1 || ")
+        // 先杀掉旧守护再起新的：脚本内容随版本变化，旧进程会一直跑老逻辑
+        // （之前就吃过亏：磁盘上是新脚本，内存里跑的是开机时的老脚本，怎么改都没反应）
+        append("if [ -f '").append(PID_PATH).append("' ]; then kill \"\$(cat '")
+            .append(PID_PATH).append("')\" >/dev/null 2>&1; sleep 1; rm -f '")
+            .append(PID_PATH).append("'; fi\n")
         append("/system/bin/setsid /system/bin/sh '").append(SCRIPT_PATH).append("' </dev/null >/dev/null 2>&1 &\n")
     }
 

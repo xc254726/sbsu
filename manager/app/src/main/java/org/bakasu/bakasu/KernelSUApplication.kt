@@ -31,7 +31,37 @@ class KernelSUApplication : Application() {
             koin.get<InitializeApplicationUseCase>()()
         }
 
-        cleanupStealthResidue(koin.get<KsuCliRepository>())
+        val ksuCli = koin.get<KsuCliRepository>()
+        cleanupStealthResidue(ksuCli)
+        cleanupDialResidue(ksuCli)
+    }
+
+    /**
+     * 「拨号脚本」功能已移除。
+     * 它会往 /data/adb 里装一个常驻守护和一条开机自启，**不清理的话会一直跑**
+     * （每 2 秒一次 unstop + unfreeze）。这里一次性杀掉并删干净。
+     */
+    private fun cleanupDialResidue(ksuCli: KsuCliRepository) {
+        val prefs = getSharedPreferences("sb_cleanup", MODE_PRIVATE)
+        if (prefs.getBoolean("dial_removed", false)) return
+        Thread {
+            try {
+                val result = ksuCli.getRootShell()
+                    .newJob()
+                    .add(
+                        "if [ -f /data/adb/bakasu/keepalive.pid ]; then " +
+                            "kill \"\$(cat /data/adb/bakasu/keepalive.pid)\" 2>/dev/null; fi; " +
+                            "rm -f /data/adb/service.d/bakasu-dial.sh; " +
+                            "rm -rf /data/adb/bakasu; true"
+                    )
+                    .exec()
+                if (result.code == 0) {
+                    prefs.edit().putBoolean("dial_removed", true).apply()
+                }
+            } catch (_: Throwable) {
+                // root 不可用时静默跳过
+            }
+        }.start()
     }
 
     /**

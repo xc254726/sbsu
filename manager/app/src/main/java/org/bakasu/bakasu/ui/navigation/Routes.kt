@@ -165,15 +165,6 @@ sealed interface Route :
 
     @Parcelize
     @Serializable
-    data object DialScript : Route
-
-    /** 从拨号脚本页跳过来的「选一个脚本文件」，由隐藏终端以选择模式呈现 */
-    @Parcelize
-    @Serializable
-    data object ScriptPicker : Route
-
-    @Parcelize
-    @Serializable
     data object UmountManager : Route
 
     @Parcelize

@@ -79,8 +79,6 @@ import org.bakasu.bakasu.ui.overscroll.rememberCustomOverscrollFactory
 import org.bakasu.bakasu.ui.screen.AppProfileScreen
 import org.bakasu.bakasu.ui.screen.AppProfileTemplateScreen
 import org.bakasu.bakasu.ui.screen.DynamicManagerScreen
-import org.bakasu.bakasu.data.dial.ScriptPick
-import org.bakasu.bakasu.ui.screen.dialscript.DialScriptScreen
 import org.bakasu.bakasu.ui.screen.ExecuteModuleActionScreen
 import org.bakasu.bakasu.ui.screen.FlashIt
 import org.bakasu.bakasu.ui.screen.FlashScreen
@@ -556,36 +554,6 @@ fun NavContainer(
                     useBlur = useBlur,
                 ) {
                     FileManagerScreen()
-                }
-            }
-
-            entry<Route.DialScript>(swipeDismiss = swipeBackDirection) {
-                ManagerNavEntry(
-                    interceptPredictiveBack = interceptPredictiveBack,
-                    onBack = onBack,
-                    themeConfig = themeConfig,
-                    backgroundRenderState = backgroundRenderState,
-                    useBlur = useBlur,
-                ) {
-                    DialScriptScreen()
-                }
-            }
-
-            entry<Route.ScriptPicker>(swipeDismiss = swipeBackDirection) {
-                ManagerNavEntry(
-                    interceptPredictiveBack = interceptPredictiveBack,
-                    onBack = onBack,
-                    themeConfig = themeConfig,
-                    backgroundRenderState = backgroundRenderState,
-                    useBlur = useBlur,
-                ) {
-                    FileManagerScreen(
-                        pickMode = true,
-                        onPicked = { path ->
-                            ScriptPick.post(path)
-                            navigator.pop()
-                        },
-                    )
                 }
             }
 

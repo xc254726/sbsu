@@ -31,7 +31,6 @@ import androidx.compose.material.icons.twotone.Adb
 import androidx.compose.material.icons.twotone.BugReport
 import androidx.compose.material.icons.twotone.Delete
 import androidx.compose.material.icons.twotone.DeleteForever
-import androidx.compose.material.icons.twotone.Dialpad
 import androidx.compose.material.icons.twotone.ElectricalServices
 import androidx.compose.material.icons.twotone.Extension
 import androidx.compose.material.icons.twotone.Fence
@@ -491,16 +490,6 @@ fun SettingsPage(bottomPadding: Dp) {
                                 description = "双栏 root 文件管理，可进入 /data 并运行 sh",
                                 onClick = {
                                     navigator.push(Route.FileManager)
-                                },
-                            )
-                        }
-                        item {
-                            SettingsJumpPageWidget(
-                                icon = Icons.TwoTone.Dialpad,
-                                title = "拨号脚本",
-                                description = "拨 *#*#密令#*#* 静默以 root 执行脚本",
-                                onClick = {
-                                    navigator.push(Route.DialScript)
                                 },
                             )
                         }

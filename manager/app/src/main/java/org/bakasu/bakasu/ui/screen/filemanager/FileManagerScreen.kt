@@ -3,6 +3,8 @@ package org.bakasu.bakasu.ui.screen.filemanager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -25,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,6 +35,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -82,16 +85,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import java.io.File
 import java.text.SimpleDateFormat
@@ -103,7 +110,7 @@ import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.data.file.RootFileEntry
 import org.bakasu.bakasu.data.file.RootFileRepository
 import org.bakasu.bakasu.data.file.RootOpResult
-import org.bakasu.bakasu.data.file.ScriptOutput
+import org.bakasu.bakasu.data.file.ScriptSession
 import org.bakasu.bakasu.data.file.TextPreview
 import org.bakasu.bakasu.data.shell.KsuCliRepository
 import org.bakasu.bakasu.ui.component.ConfirmResult
@@ -181,8 +188,7 @@ fun FileManagerScreen() {
     var showTools by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var headerPane by remember { mutableStateOf<PaneState?>(null) }
-    var scriptRunning by remember { mutableStateOf(false) }
-    var scriptOutput by remember { mutableStateOf<ScriptOutput?>(null) }
+    var terminal by remember { mutableStateOf<ScriptTerminal?>(null) }
 
     LaunchedEffect(Unit) {
         hasRoot = withContext(Dispatchers.IO) { repo.hasRoot() }
@@ -672,20 +678,29 @@ fun FileManagerScreen() {
             title = "运行脚本",
             label = "参数（可留空）",
             initial = "",
-            supporting = "sh ${current.target.name}\n以 root 身份执行，工作目录为脚本所在目录",
+            supporting = "sh ${current.target.name}\n以 root 身份执行，工作目录为脚本所在目录\n运行后可实时查看输出并输入内容",
             confirmLabel = "运行",
             allowEmpty = true,
             onDismiss = { dialog = null },
             onConfirm = { args ->
                 dialog = null
+                val run = ScriptTerminal(current.target.name, current.target.path)
+                terminal = run
                 scope.launch {
-                    scriptRunning = true
-                    val outcome = withContext(Dispatchers.IO) {
-                        runCatching { repo.runScript(current.target.path, args) }
+                    val session = withContext(Dispatchers.IO) {
+                        ScriptSession.start(
+                            scriptPath = current.target.path,
+                            args = args,
+                            onOutput = { run.append(it) },
+                            onFinished = { code -> run.finish(code) },
+                        )
                     }
-                    scriptRunning = false
-                    outcome.onSuccess { scriptOutput = it }
-                        .onFailure { snackbarHost.showReplacingSnackbar(it.message ?: "执行失败") }
+                    if (session == null) {
+                        run.append("无法启动脚本：没有找到可用的 shell\n")
+                        run.finish(-1)
+                    } else {
+                        run.session = session
+                    }
                 }
             },
         )
@@ -697,67 +712,211 @@ fun FileManagerScreen() {
         )
     }
 
-    if (scriptRunning) {
-        Dialog(onDismissRequest = {}) {
-            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(14.dp))
-                    Text(text = "正在以 root 执行…", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
+    val running = terminal
+    if (running != null) {
+        ScriptTerminalDialog(
+            run = running,
+            onSend = { text -> running.session?.send(text) },
+            onStop = { running.session?.stop() },
+            onClose = {
+                running.session?.stop()
+                terminal = null
+            },
+        )
+    }
+}
+
+/**
+ * 一次脚本运行的界面状态：累积输出、记录退出码。
+ * 输出在后台线程到达，这里统一转到主线程再写入 snapshot state。
+ */
+private class ScriptTerminal(val name: String, val path: String) {
+    private val content = StringBuilder()
+    private val handler = Handler(Looper.getMainLooper())
+    private val textState = mutableStateOf("")
+    private val exitState = mutableStateOf<Int?>(null)
+    private var scheduled = false
+
+    var session: ScriptSession? = null
+
+    val text: String get() = textState.value
+    val exitCode: Int? get() = exitState.value
+
+    @Synchronized
+    fun append(chunk: String) {
+        content.append(chunk)
+        if (content.length > MAX_CHARS) {
+            content.delete(0, content.length - MAX_CHARS)
+        }
+        if (scheduled) return
+        scheduled = true
+        handler.postDelayed({ flush() }, 60L)
+    }
+
+    fun finish(code: Int) {
+        handler.post {
+            exitState.value = code
+            flush()
         }
     }
 
-    val result = scriptOutput
-    if (result != null) {
-        Dialog(onDismissRequest = { scriptOutput = null }) {
-            Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "脚本输出", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.width(10.dp))
+    @Synchronized
+    private fun flush() {
+        scheduled = false
+        textState.value = content.toString()
+    }
+
+    private companion object {
+        const val MAX_CHARS = 120_000
+    }
+}
+
+/**
+ * 全屏终端弹窗：实时输出 + 可输入 stdin。
+ * 需要用户输入的脚本（选择菜单、确认提示）就在这里回答。
+ */
+@Composable
+private fun ScriptTerminalDialog(
+    run: ScriptTerminal,
+    onSend: (String) -> Unit,
+    onStop: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val scroll = rememberScrollState()
+    var input by remember { mutableStateOf("") }
+    val output = run.text
+    val exitCode = run.exitCode
+
+    LaunchedEffect(output) {
+        scroll.scrollTo(scroll.maxValue)
+    }
+
+    val terminalBackground = Color(0xFF0A0B0E)
+    val panelBackground = Color(0xFF14161C)
+    val fieldBackground = Color(0xFF1E2029)
+    val bodyColor = Color(0xFFCBD5CF)
+    val titleColor = Color(0xFFEDEDF2)
+    val hintColor = Color(0xFF6A6E7C)
+    val accentColor = Color(0xFF6EE7A0)
+
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 16.dp),
+            shape = RoundedCornerShape(22.dp),
+            color = terminalBackground,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(panelBackground)
+                        .padding(start = 16.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (result.ok) "退出码 0" else "退出码 ${result.exitCode}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (result.ok) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
+                            text = run.name,
+                            color = titleColor,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 400.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .padding(12.dp)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
                         Text(
-                            text = result.output.ifBlank { "（无输出）" },
-                            style = MaterialTheme.typography.bodySmall,
+                            text = when (val code = exitCode) {
+                                null -> "运行中 · ${run.path}"
+                                else -> "已结束 · 退出码 $code"
+                            },
+                            color = if (exitCode == null) accentColor else Color(0xFF9DA0AC),
+                            fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        TextButton(
-                            onClick = {
-                                clipboard.setText(AnnotatedString(result.output))
-                                toast("输出已复制")
+                    if (exitCode == null) {
+                        TextButton(onClick = onStop) {
+                            Text("停止", color = Color(0xFFFF9A9A), fontSize = 12.sp)
+                        }
+                    }
+                    TextButton(onClick = onClose) {
+                        Text("关闭", color = Color(0xFF9DA0AC), fontSize = 12.sp)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(terminalBackground),
+                ) {
+                    Text(
+                        text = output.ifEmpty { "正在启动脚本…" },
+                        color = if (output.isEmpty()) hintColor else bodyColor,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scroll)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(panelBackground)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicTextField(
+                        value = input,
+                        onValueChange = { input = it },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = Color(0xFFE8EAF0),
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        cursorBrush = SolidColor(accentColor),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(
+                            onSend = {
+                                onSend(input)
+                                input = ""
                             },
-                        ) { Text("复制") }
-                        TextButton(onClick = { scriptOutput = null }) { Text("关闭") }
+                        ),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { inner ->
+                            Box(
+                                modifier = Modifier
+                                    .background(fieldBackground, RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                            ) {
+                                if (input.isEmpty()) {
+                                    Text(
+                                        text = "输入内容后回车发送给脚本",
+                                        color = hintColor,
+                                        fontSize = 12.sp,
+                                    )
+                                }
+                                inner()
+                            }
+                        },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            onSend(input)
+                            input = ""
+                        },
+                    ) {
+                        Text("发送", color = accentColor, fontSize = 12.sp)
                     }
                 }
             }

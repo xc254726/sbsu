@@ -1,7 +1,6 @@
 package org.bakasu.bakasu.ui.screen.main
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -35,6 +34,7 @@ import androidx.compose.material.icons.twotone.DeleteForever
 import androidx.compose.material.icons.twotone.ElectricalServices
 import androidx.compose.material.icons.twotone.Extension
 import androidx.compose.material.icons.twotone.Fence
+import androidx.compose.material.icons.twotone.Folder
 import androidx.compose.material.icons.twotone.FolderDelete
 import androidx.compose.material.icons.twotone.FolderOff
 import androidx.compose.material.icons.twotone.Info
@@ -51,7 +51,6 @@ import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Update
 import androidx.compose.material.icons.twotone.VerifiedUser
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -60,7 +59,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.rememberTopAppBarState
@@ -158,7 +156,6 @@ fun SettingsPage(bottomPadding: Dp) {
         val logSaved = stringResource(R.string.log_saved)
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        var showMtDialog by remember { mutableStateOf(false) }
         val exportBugreportLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.CreateDocument("application/gzip"),
         ) { uri: Uri? ->
@@ -499,13 +496,11 @@ fun SettingsPage(bottomPadding: Dp) {
                         }
                         item {
                             SettingsJumpPageWidget(
-                                icon = Icons.TwoTone.OpenInNew,
-                                title = "MT 管理器",
-                                description = "调用已安装的 MT 管理器管理文件",
+                                icon = Icons.TwoTone.Folder,
+                                title = "文件管理",
+                                description = "以 root 身份浏览 / 删除 / 复制文件（可进 /data）",
                                 onClick = {
-                                    if (!launchMtManager(context)) {
-                                        showMtDialog = true
-                                    }
+                                    navigator.push(Route.FileManager)
                                 },
                             )
                         }
@@ -604,49 +599,7 @@ fun SettingsPage(bottomPadding: Dp) {
                 )
             }
         }
-
-        if (showMtDialog) {
-            AlertDialog(
-                onDismissRequest = { showMtDialog = false },
-                title = { Text("未安装 MT 管理器") },
-                text = {
-                    Text("调用 MT 管理器需要先安装它（包名为 bin.mt.plus）。可以从官网 mt2.cn 下载官方版本。")
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showMtDialog = false
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse("https://mt2.cn/"))
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
-                            }
-                        },
-                    ) {
-                        Text("去官网下载")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showMtDialog = false }) {
-                        Text("取消")
-                    }
-                },
-            )
-        }
     }
-}
-
-/** MT 管理器的官方包名，用于检测是否已安装。 */
-private const val MT_MANAGER_PACKAGE = "bin.mt.plus"
-
-/** 尝试唤起已安装的 MT 管理器，未安装或启动失败时返回 false。 */
-private fun launchMtManager(context: Context): Boolean {
-    val intent = context.packageManager
-        .getLaunchIntentForPackage(MT_MANAGER_PACKAGE)
-        ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        ?: return false
-    return runCatching { context.startActivity(intent) }.isSuccess
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

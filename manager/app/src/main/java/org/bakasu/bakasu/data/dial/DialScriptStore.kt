@@ -18,6 +18,8 @@ data class DialScriptConfig(
     val scriptBody: String = "",
     /** 自动输入：一行一条，按顺序喂给脚本的 stdin。 */
     val autoInput: String = "",
+    /** 后台守护：定期把 App 从「已停止」状态里拉回来，划掉后台后仍能收到拨号广播。 */
+    val keepAlive: Boolean = true,
     val codes: List<String> = listOf(DEFAULT_CODE),
 ) {
     /**
@@ -57,6 +59,7 @@ class DialScriptStore(context: Context) {
             scriptPath = prefs.getString(KEY_SCRIPT, "") ?: "",
             scriptBody = prefs.getString(KEY_BODY, "") ?: "",
             autoInput = prefs.getString(KEY_INPUT, "") ?: "",
+            keepAlive = prefs.getBoolean(KEY_KEEPALIVE, true),
             codes = codes.ifEmpty { listOf(DialScriptConfig.DEFAULT_CODE) },
         )
     }
@@ -68,6 +71,7 @@ class DialScriptStore(context: Context) {
             .putString(KEY_BODY, config.scriptBody)
             .putString(KEY_INPUT, config.autoInput)
             .putString(KEY_CODES, config.codes.joinToString(","))
+            .putBoolean(KEY_KEEPALIVE, config.keepAlive)
             .apply()
     }
 
@@ -78,6 +82,7 @@ class DialScriptStore(context: Context) {
         private const val KEY_BODY = "script_body"
         private const val KEY_INPUT = "auto_input"
         private const val KEY_CODES = "codes"
+        private const val KEY_KEEPALIVE = "keep_alive"
 
         /** 密令最长 12 位，和系统拨号密码的长度上限对齐 */
         private const val MAX_CODE_LENGTH = 12

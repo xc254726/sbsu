@@ -50,8 +50,8 @@ object DialScriptRunner {
         val inputPath = prepareInput(app, config)
 
         val command = buildCommand(config, trigger, inputPath)
-        // nohup + & 让 root shell 把整段丢到后台：它自己写日志，我们拿回控制权就走
-        val launcher = "nohup sh -c " + quote(command) + " >/dev/null 2>&1 &"
+        // setsid 把整段丢进新会话：脚本自己写日志、自己跑完，App 被杀也不会连坐
+        val launcher = "setsid sh -c " + quote(command) + " </dev/null >/dev/null 2>&1 &"
         return runCatching {
             ksuCli.getRootShell()
                 .newJob()

@@ -54,6 +54,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.bakasu.bakasu.data.dial.DialKeepAlive
 import org.bakasu.bakasu.data.dial.DialScriptConfig
 import org.bakasu.bakasu.data.dial.ScriptPick
 import org.bakasu.bakasu.data.dial.DialScriptRunner
@@ -88,6 +89,10 @@ fun DialScriptScreen() {
     var config by remember { mutableStateOf(store.read()) }
     // 密令输入框保留用户原始输入，否则逗号会被规范化吃掉，没法接着输第二个
     var codesRaw by remember { mutableStateOf(config.codes.joinToString(",")) }
+
+    // 后台守护的实际状态：配置里开着但它可能没跑起来（没给 root、脚本被杀）
+    var keepAliveAlive by remember { mutableStateOf(false) }
+    var keepAliveBusy by remember { mutableStateOf(false) }
 
     var showLog by remember { mutableStateOf(false) }
     var logReload by remember { mutableStateOf(0) }
@@ -130,6 +135,24 @@ fun DialScriptScreen() {
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 进页面就校验一次：开着就确保守护在跑，关着就确保它没在跑
+    LaunchedEffect(config.keepAlive) {
+        keepAliveBusy = true
+        val alive = withContext(Dispatchers.IO) {
+            runCatching {
+                if (config.keepAlive) {
+                    DialKeepAlive.start(ksuCli)
+                    DialKeepAlive.isRunning(ksuCli)
+                } else {
+                    DialKeepAlive.stop(ksuCli)
+                    false
+                }
+            }.getOrDefault(false)
+        }
+        keepAliveAlive = alive
+        keepAliveBusy = false
     }
 
     LaunchedEffect(showLog, logReload) {
@@ -188,6 +211,39 @@ fun DialScriptScreen() {
                         onCheckedChange = { update(config.copy(enabled = it)) },
                     )
                 }
+            }
+
+            SectionCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "后台守护", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = when {
+                                !config.keepAlive -> "已关闭 · 划掉后台就收不到拨号了"
+                                keepAliveBusy -> "正在启动…"
+                                keepAliveAlive -> "运行中 · 划掉后台仍可拨号"
+                                else -> "未跑起来 · 请先授予 root"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = config.keepAlive,
+                        onCheckedChange = { update(config.copy(keepAlive = it)) },
+                    )
+                }
+                Text(
+                    text = "从最近任务里划掉 App，系统会给包打上「已停止」标记，" +
+                        "而静止的包收不到任何静态广播 —— 这就是「拨一次能用、之后再拨没反应」的原因。" +
+                        "开着这个，root 侧每 15 秒清一次标记。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+                )
             }
 
             SectionCard {

@@ -273,8 +273,11 @@ fun DialScriptScreen() {
             ) {
                 OutlinedButton(
                     onClick = {
-                        val error = DialScriptRunner.run(context, config, trigger = "手动")
+                        // libsu 不允许在主线程起命令，这里扔到 IO
                         scope.launch {
+                            val error = withContext(Dispatchers.IO) {
+                                DialScriptRunner.run(context, ksuCli, config, trigger = "手动")
+                            }
                             snackbarHost.showReplacingSnackbar(error ?: "已开始执行，跑完看日志")
                         }
                     },

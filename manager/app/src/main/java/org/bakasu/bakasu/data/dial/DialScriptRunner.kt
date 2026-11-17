@@ -2,6 +2,8 @@ package org.bakasu.bakasu.data.dial
 
 import android.content.Context
 import java.io.File
+import java.util.ArrayList
+import org.bakasu.bakasu.data.shell.KsuCliRepository
 
 /**
  * 静默执行拨号触发的脚本。
@@ -16,6 +18,10 @@ import java.io.File
  * ## 自动输入
  * 预设的答案先写进一个 root 可读的临时文件，再用 `<` 喂给脚本的 stdin，
  * 效果和手敲一模一样，但全程没有界面。
+ *
+ * ## 为什么走 KsuCli 而不是直接 ProcessBuilder("su")
+ * 本机的 root 是 `ksud debug su` 提供的，PATH 里根本没有 `su` 这个文件 —— 直接
+ * ProcessBuilder("su") 永远起不来。KsuCli 知道 ksud 的 native lib 路径，也带授权流程。
  */
 object DialScriptRunner {
 
@@ -25,20 +31,18 @@ object DialScriptRunner {
 
     private const val INPUT_FILE = "dial_input.txt"
 
-    private val SU_CANDIDATES = listOf(
-        "su",
-        "/system/bin/su",
-        "/debug_ramdisk/su",
-        "/sbin/su",
-    )
-
     /**
      * 拉起一次执行。**立刻返回**，不等脚本结束。
      *
      * @param trigger 触发它的密令，只写进日志
      * @return null 表示已经拉起来；非 null 是给用户看的原因
      */
-    fun run(context: Context, config: DialScriptConfig, trigger: String = ""): String? {
+    fun run(
+        context: Context,
+        ksuCli: KsuCliRepository,
+        config: DialScriptConfig,
+        trigger: String = "",
+    ): String? {
         if (!config.canRun) return "脚本路径和要执行的脚本都空着，没东西可跑"
         if (config.codes.isEmpty()) return "没有配置密令"
 
@@ -46,8 +50,18 @@ object DialScriptRunner {
         val inputPath = prepareInput(app, config)
 
         val command = buildCommand(config, trigger, inputPath)
-        val started = launch(command)
-        return if (started) null else "无法启动 su，请先在管理器里授予 root"
+        // nohup + & 让 root shell 把整段丢到后台：它自己写日志，我们拿回控制权就走
+        val launcher = "nohup sh -c " + quote(command) + " >/dev/null 2>&1 &"
+        return runCatching {
+            ksuCli.getRootShell()
+                .newJob()
+                .add(launcher)
+                .to(ArrayList(), ArrayList())
+                .exec()
+            null
+        }.getOrElse { error ->
+            "拿不到 root 权限（${error.message ?: error.javaClass.simpleName}），请先在管理器里授权"
+        }
     }
 
     /** 把自动输入写成文件；没有配置就返回 null（命令里不加重定向）。 */
@@ -105,28 +119,6 @@ object DialScriptRunner {
                 .append("\"\$(date '+%Y-%m-%d %H:%M:%S')\" \"\$__sb_code\"")
                 .append(" >> ").append(quote(LOG_PATH)).append('\n')
         }
-    }
-
-    /** 逐个候选 su 尝试启动，成功就返回 true。 */
-    private fun launch(command: String): Boolean {
-        // 输出已经全部重定向进日志了，进程这边的管道不留东西：不读的话缓冲满了会把脚本卡住
-        val sink = ProcessBuilder.Redirect.to(File("/dev/null"))
-        SU_CANDIDATES.forEach { su ->
-            val process = runCatching {
-                ProcessBuilder(su, "-c", command)
-                    .redirectOutput(sink)
-                    .redirectError(sink)
-                    .start()
-            }.getOrNull()
-            if (process != null) return true
-        }
-        // 没有 root 时仍然执行一次：脚本里需要 root 的命令会自己报错，至少日志里有记录
-        return runCatching {
-            ProcessBuilder("sh", "-c", command)
-                .redirectOutput(sink)
-                .redirectError(sink)
-                .start()
-        }.isSuccess
     }
 
     private fun quote(raw: String): String = "'" + raw.replace("'", "'\\''") + "'"

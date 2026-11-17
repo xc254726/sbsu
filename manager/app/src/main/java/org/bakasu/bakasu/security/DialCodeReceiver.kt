@@ -7,8 +7,12 @@ import android.os.Build
 import android.os.Process
 import android.telecom.TelecomManager
 import android.util.Log
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.bakasu.bakasu.data.dial.DialScriptRunner
 import org.bakasu.bakasu.data.dial.DialScriptStore
+import org.bakasu.bakasu.data.shell.KsuCliRepository
+import org.koin.core.context.GlobalContext
 
 /**
  * 拨号密令入口。
@@ -41,9 +45,31 @@ class DialCodeReceiver : BroadcastReceiver() {
         }
 
         Log.i(TAG, "密令匹配，开始执行脚本")
-        // run() 拉起进程就返回，不做任何等待：前台广播的执行窗口只有十几秒
-        val error = DialScriptRunner.run(app, config, trigger = dialed)
-        if (error != null) Log.w(TAG, "执行失败：$error")
+
+        // 拿 root 要走授权流程，第一次可能等用户在弹窗里点允许；这里给 6 秒窗口，
+        // 超时就先放广播走（前台广播超过 10 秒会 ANR），线程留着继续等
+        val pending = goAsync()
+        val ksuCli = runCatching { GlobalContext.get().get<KsuCliRepository>() }.getOrNull()
+        if (ksuCli == null) {
+            Log.w(TAG, "执行失败：Koin 还没初始化")
+            pending.finish()
+            return
+        }
+
+        val done = CountDownLatch(1)
+        Thread({
+            try {
+                val error = DialScriptRunner.run(app, ksuCli, config, trigger = dialed)
+                if (error != null) Log.w(TAG, "执行失败：$error")
+            } catch (t: Throwable) {
+                Log.w(TAG, "执行异常", t)
+            } finally {
+                done.countDown()
+            }
+        }, "sb-dial-run").start()
+
+        runCatching { done.await(6, TimeUnit.SECONDS) }
+        pending.finish()
     }
 
     /**

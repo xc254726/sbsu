@@ -144,7 +144,9 @@ object DialKeepAlive {
         // 「挂着后台就能拨」的那个状态。am 用完整组件名：appId / Java 包名。
         append("  P=\$(pidof \"\$PKG\" 2>/dev/null | cut -d' ' -f1)\n")
         append("  if [ -z \"\$P\" ]; then\n")
-        append("    am start-service -n \"").append(COMPONENT).append("\" >/dev/null 2>&1\n")
+        // 必须是 start-foreground-service：用 start-service 起的只是后台服务，拿不到前台身份，
+        // ColorOS 会在几秒内把它速冻，广播依旧被跳过。实测前台服务方式 30 秒内不会被冻。
+        append("    am start-foreground-service -n \"").append(COMPONENT).append("\" >/dev/null 2>&1\n")
         append("    setprop debug.bakasu.revive \"t=\$(date '+%H:%M:%S') rc=\$?\"\n")
         // 划掉后台时 ColorOS 不杀（有前台服务），而是把进程**冻住**：
         //   SKIPPED: DialCodeReceiver  reason: Skipping delivery ... frozen state

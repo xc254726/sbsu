@@ -129,6 +129,9 @@ object DialKeepAlive {
         append("    say \"moved to \$cg\"; break\n")
         append("  fi\n")
         append("done\n")
+        append("LPID=\n")
+        // 每 5 轮（10 秒）重申一次解冻，兜底 --sticky 万一被厂商逻辑绕过去
+        append("N=0\n")
         append("while true; do\n")
         // 不再依赖解析 package-restrictions.xml：那玩意儿的格式随版本会变，
         // 而且 root 侧不一定读得到。`cmd package unstop` 对没被停用的包是空操作，
@@ -139,10 +142,21 @@ object DialKeepAlive {
         // 进程被 o-stop 杀掉之后，光清 stopped 还不够：系统仍然不肯为一个"刚被划掉"的包
         // 冷启动进程来接广播。所以直接在 root 侧把它拉回来 —— 这就是用户验证过
         // 「挂着后台就能拨」的那个状态。am 用完整组件名：appId / Java 包名。
-        append("  if ! pidof \"\$PKG\" >/dev/null 2>&1; then\n")
+        append("  P=\$(pidof \"\$PKG\" 2>/dev/null | cut -d' ' -f1)\n")
+        append("  if [ -z \"\$P\" ]; then\n")
         append("    am start-service -n \"").append(COMPONENT).append("\" >/dev/null 2>&1\n")
         append("    setprop debug.bakasu.revive \"t=\$(date '+%H:%M:%S') rc=\$?\"\n")
+        // 划掉后台时 ColorOS 不杀（有前台服务），而是把进程**冻住**：
+        //   SKIPPED: DialCodeReceiver  reason: Skipping delivery ... frozen state
+        // 冻结状态下广播直接被跳过，接收器一次都进不来。--sticky 表示「系统不要自动再冻」，
+        // 实测执行后 isFrozen 一直保持 false。
+        append("  elif [ \"\$P\" != \"\$LPID\" ] || [ \$N -ge 5 ]; then\n")
+        append("    am unfreeze --sticky \"\$P\" >/dev/null 2>&1\n")
+        append("    setprop debug.bakasu.unfreeze \"t=\$(date '+%H:%M:%S') pid=\$P rc=\$?\"\n")
+        append("    LPID=\$P\n")
+        append("    N=0\n")
         append("  fi\n")
+        append("  N=\$((N+1))\n")
         append("  sleep ").append(INTERVAL).append('\n')
         append("done\n")
         append("SB_KEEPALIVE\n")

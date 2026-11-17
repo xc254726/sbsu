@@ -165,6 +165,10 @@ sealed interface Route :
 
     @Parcelize
     @Serializable
+    data object DialScript : Route
+
+    @Parcelize
+    @Serializable
     data object UmountManager : Route
 
     @Parcelize

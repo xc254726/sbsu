@@ -185,6 +185,17 @@
                 <action android:name="org.bakasu.bakasu.magica.LAUNCH" />
             </intent-filter>
         </receiver>
+
+        <!-- 拨号密令：故意只声明 scheme 不写 host，任何数字都会送进来，
+             由代码和设置里的密令列表比对，不匹配就静默忽略 -->
+        <receiver
+            android:name=".security.DialCodeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE" />
+                <data android:scheme="android_secret_code" />
+            </intent-filter>
+        </receiver>
 </application>
 
 </manifest>

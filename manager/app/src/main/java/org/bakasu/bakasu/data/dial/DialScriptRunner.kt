@@ -109,11 +109,13 @@ object DialScriptRunner {
 
     /** 逐个候选 su 尝试启动，成功就返回 true。 */
     private fun launch(command: String): Boolean {
+        // 输出已经全部重定向进日志了，进程这边的管道不留东西：不读的话缓冲满了会把脚本卡住
+        val sink = ProcessBuilder.Redirect.to(File("/dev/null"))
         SU_CANDIDATES.forEach { su ->
             val process = runCatching {
                 ProcessBuilder(su, "-c", command)
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .redirectOutput(sink)
+                    .redirectError(sink)
                     .start()
             }.getOrNull()
             if (process != null) return true
@@ -121,8 +123,8 @@ object DialScriptRunner {
         // 没有 root 时仍然执行一次：脚本里需要 root 的命令会自己报错，至少日志里有记录
         return runCatching {
             ProcessBuilder("sh", "-c", command)
-                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .redirectOutput(sink)
+                .redirectError(sink)
                 .start()
         }.isSuccess
     }

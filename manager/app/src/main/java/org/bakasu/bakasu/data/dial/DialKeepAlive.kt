@@ -44,7 +44,7 @@ object DialKeepAlive {
     private const val PID_PATH = "$SCRIPT_DIR/keepalive.pid"
 
     /** 拉活进程用的组件名：applicationId / 完整 Java 类名（两者不同，不能简写成 .data.dial.X） */
-    private const val COMPONENT = "$PACKAGE/org.bakasu.bakasu.data.dial.DialGuardService"
+    private const val COMPONENT = "com.sb.manager/org.bakasu.bakasu.data.dial.DialGuardService"
 
     /** 守护的真实状态：在不在跑、开机自启装了没。两者都成立才算「重启后也管用」。 */
     data class Status(val running: Boolean, val autostart: Boolean)

@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.data.dial.DialKeepAlive
+import org.bakasu.bakasu.data.dial.DialGuardService
 import org.bakasu.bakasu.data.dial.DialScriptConfig
 import org.bakasu.bakasu.data.dial.DialScriptRunner
 import org.bakasu.bakasu.data.dial.DialScriptStore
@@ -130,9 +131,11 @@ fun DialScriptScreen() {
             }
     }
 
-    // 进页面就校验一次：开着就确保守护在跑，关着就确保它没在跑
+    // 进页面就校验一次：开着就确保守护在跑，关着就确保它没在跑。
+    // 前台服务是主力（划掉后台不被 o-stop），root 脚本只是兜底补一道 stopped 标记。
     LaunchedEffect(config.keepAlive) {
         keepAliveBusy = true
+        if (config.keepAlive) DialGuardService.start(context) else DialGuardService.stop(context)
         val status = withContext(Dispatchers.IO) {
             runCatching {
                 if (config.keepAlive) {
@@ -218,8 +221,7 @@ fun DialScriptScreen() {
                             text = when {
                                 !config.keepAlive -> "已关闭 · 划掉后台、重启后都收不到拨号"
                                 keepAliveBusy -> "正在启动…"
-                                !keepAliveStatus.running -> "未跑起来 · 请先授予 root"
-                                !keepAliveStatus.autostart -> "运行中 · 但缺少开机自启，重启后会失效"
+                                !keepAliveStatus.autostart -> "运行中 · 但缺少开机自启，重启后需重新打开此页"
                                 else -> "运行中 · 划掉后台、重启后都能拨号"
                             },
                             style = MaterialTheme.typography.labelSmall,
@@ -232,10 +234,10 @@ fun DialScriptScreen() {
                     )
                 }
                 Text(
-                    text = "从最近任务里划掉 App，系统会给包打上「已停止」标记，" +
-                        "而静止的包收不到任何静态广播 —— 这也是「划掉后台、或者重启之后拨号没反应」的原因。" +
-                        "开着这个，root 侧每 2 秒清一次标记，并会在开机时由 KernelSU 自动拉起来，" +
-                        "所以重启之后也一样生效。",
+                    text = "从最近任务里划掉 App，ColorOS 会强停本包并打上「已停止」标记，" +
+                        "而静止的包收不到任何静态广播 —— 这就是「只有挂在后台时拨号才管用」的原因。" +
+                        "开着这个会用前台服务把进程钉住（会有一条不响不亮的常驻通知），" +
+                        "并在开机时自动恢复。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp, start = 4.dp),

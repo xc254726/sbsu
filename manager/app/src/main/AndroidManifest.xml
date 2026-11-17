@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <uses-permission
         android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
@@ -172,6 +173,17 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- 拨号守护：前台服务把进程钉住，划掉后台时 ColorOS 不会 o-stop 本包，
+             静态广播接收器才能一直被投递 -->
+        <service
+            android:name=".data.dial.DialGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="keep the secret-code receiver alive after the task is swiped away" />
+        </service>
+
         <receiver
             android:name=".magica.BootCompletedReceiver"
             android:directBootAware="true"
@@ -188,6 +200,15 @@
 
         <!-- 拨号密令：故意只声明 scheme 不写 host，任何数字都会送进来，
              由代码和设置里的密令列表比对，不匹配就静默忽略 -->
+        <receiver
+            android:name=".security.DialBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".security.DialCodeReceiver"
             android:exported="true">

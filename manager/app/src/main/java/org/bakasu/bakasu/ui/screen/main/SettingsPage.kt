@@ -45,7 +45,6 @@ import androidx.compose.material.icons.twotone.RestartAlt
 import androidx.compose.material.icons.twotone.Save
 import androidx.compose.material.icons.twotone.Science
 import androidx.compose.material.icons.twotone.Security
-import androidx.compose.material.icons.twotone.Terminal
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Update
@@ -480,16 +479,6 @@ fun SettingsPage(bottomPadding: Dp) {
                                 title = stringResource(R.string.send_log),
                                 onClick = {
                                     showBottomsheet = true
-                                },
-                            )
-                        }
-                        item {
-                            SettingsJumpPageWidget(
-                                icon = Icons.TwoTone.Terminal,
-                                title = "隐藏终端",
-                                description = "双栏 root 文件管理，可进入 /data 并运行 sh",
-                                onClick = {
-                                    navigator.push(Route.FileManager)
                                 },
                             )
                         }

@@ -95,6 +95,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -161,7 +162,12 @@ private class PaneState(initialPath: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileManagerScreen() {
+fun FileManagerScreen(
+    /** 底部导航栏占用的高度：作为底部栏页面时要留出来，否则操作栏会被压住 */
+    bottomPadding: Dp = 0.dp,
+    /** 作为底部栏页面时不显示返回箭头，根目录按返回交给系统 */
+    isTab: Boolean = false,
+) {
     val navigator = LocalNavigator.current
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -290,7 +296,8 @@ fun FileManagerScreen() {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
-    BackHandler(enabled = true) { back() }
+    // 作为独立页面时，根目录按返回就退出本页；作为底部栏页面时，根目录交给系统
+    BackHandler(enabled = !isTab || active.selected.isNotEmpty() || active.path != "/") { back() }
 
     Scaffold(
         contentWindowInsets = adaptiveScaffoldWindowInsets(),
@@ -314,7 +321,7 @@ fun FileManagerScreen() {
                         )
                     }
                 },
-                navigationIcon = { AppBackButton(onClick = { back() }) },
+                navigationIcon = { if (!isTab) AppBackButton(onClick = { back() }) },
                 actions = {
                     IconButton(
                         onClick = {
@@ -441,6 +448,9 @@ fun FileManagerScreen() {
             )
 
             Spacer(Modifier.height(8.dp))
+            if (bottomPadding > 0.dp) {
+                Spacer(Modifier.height(bottomPadding))
+            }
         }
     }
 

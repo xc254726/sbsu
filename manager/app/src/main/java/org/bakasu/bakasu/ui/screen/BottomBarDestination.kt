@@ -6,10 +6,12 @@ import androidx.compose.material.icons.twotone.AdminPanelSettings
 import androidx.compose.material.icons.twotone.Extension
 import androidx.compose.material.icons.twotone.Home
 import androidx.compose.material.icons.twotone.Settings
+import androidx.compose.material.icons.twotone.Terminal
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import org.bakasu.bakasu.R
+import org.bakasu.bakasu.ui.screen.filemanager.FileManagerScreen
 import org.bakasu.bakasu.ui.screen.main.HomePage
 import org.bakasu.bakasu.ui.screen.main.ModulePage
 import org.bakasu.bakasu.ui.screen.main.SettingsPage
@@ -41,6 +43,13 @@ enum class BottomBarDestination(
         R.string.module,
         Icons.TwoTone.Extension,
         Icons.TwoTone.Extension,
+        true,
+    ),
+    Terminal(
+        { bottomPadding -> FileManagerScreen(bottomPadding = bottomPadding, isTab = true) },
+        R.string.hidden_terminal,
+        Icons.TwoTone.Terminal,
+        Icons.TwoTone.Terminal,
         true,
     ),
     Settings(

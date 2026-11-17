@@ -161,10 +161,6 @@ sealed interface Route :
 
     @Parcelize
     @Serializable
-    data object FileManager : Route
-
-    @Parcelize
-    @Serializable
     data object UmountManager : Route
 
     @Parcelize

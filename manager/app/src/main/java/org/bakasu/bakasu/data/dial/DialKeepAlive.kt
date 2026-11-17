@@ -41,7 +41,15 @@ object DialKeepAlive {
     /** 轮询间隔（秒）。2 秒是可靠性优先：划掉后台后最多等 2 秒；读的是一个小文件，开销可以接受 */
     private const val INTERVAL = 2
 
-    private const val MARKER = "bakasu/keepalive.sh"
+    /**
+     * 匹配守护进程的模式。
+     *
+     * 中间的方括号是关键：`pgrep -f` 是按「完整命令行」匹配的，而执行 pgrep 的那个
+     * shell 命令行里就带着这段文字，用原字符串会匹配到它自己 —— 于是永远判定
+     * 「已经在跑」，守护一次都起不来。写成 `[k]eepalive` 后，正则能匹配真实进程
+     * （`sh /data/adb/bakasu/keepalive.sh`），却匹配不到写着 `[k]eepalive` 的这个 shell。
+     */
+    private const val MARKER = "bakasu/[k]eepalive.sh"
 
     /** 守护的真实状态：在不在跑、开机自启装了没。两者都成立才算「重启后也管用」。 */
     data class Status(val running: Boolean, val autostart: Boolean)
@@ -49,15 +57,15 @@ object DialKeepAlive {
     /**
      * 查一次状态。
      *
-     * `pgrep -f` 会把命令行里带这个路径的进程都算上 —— 正好只有守护自己，
-     * 因为其它命令里出现的都是带引号的同一个字符串，不构成独立进程。
+     * 用 [MARKER] 那个带方括号的模式匹配，避免 pgrep 匹配到执行它的 shell 自己
+     * （见 MARKER 的注释）—— 否则这里会永远报「运行中」，把人骗得很惨。
      * 开机脚本单独看文件在不在：KSU 升级、用户清理 /data/adb 都可能把它弄丢，
      * 那时候守护还在跑、但重启后就没了，得能看出来。
      */
     fun status(ksuCli: KsuCliRepository): Status {
         val lines = exec(
             ksuCli,
-            "pgrep -f $MARKER >/dev/null 2>&1 && echo sb-running || echo sb-idle; " +
+            "pgrep -f '$MARKER' >/dev/null 2>&1 && echo sb-running || echo sb-idle; " +
                 "[ -f '$SERVICE_D_PATH' ] && echo sb-auto || echo sb-noauto",
         ).map { it.trim() }
         return Status(
@@ -76,7 +84,7 @@ object DialKeepAlive {
 
     /** 停守护，并把开机自启一起摘掉。返回 null 表示成功。 */
     fun stop(ksuCli: KsuCliRepository): String? = runCatching {
-        exec(ksuCli, "pkill -f $MARKER >/dev/null 2>&1; rm -f '$SERVICE_D_PATH'; true")
+        exec(ksuCli, "pkill -f '$MARKER' >/dev/null 2>&1; rm -f '$SERVICE_D_PATH'; true")
         null
     }.getOrElse { error ->
         "停止守护失败：${error.message ?: error.javaClass.simpleName}"
@@ -160,7 +168,7 @@ object DialKeepAlive {
         append("cmd appops set ").append(PACKAGE).append(" START_FOREGROUND allow >/dev/null 2>&1\n")
         append("am set-standby-bucket ").append(PACKAGE).append(" active >/dev/null 2>&1\n")
         // 已经在跑就不再起第二个（两个循环会互相叠加，纯粹浪费电）
-        append("pgrep -f ").append(MARKER).append(" >/dev/null 2>&1 || ")
+        append("pgrep -f '").append(MARKER).append("' >/dev/null 2>&1 || ")
         append("/system/bin/setsid /system/bin/sh '").append(SCRIPT_PATH).append("' </dev/null >/dev/null 2>&1 &\n")
     }
 

@@ -98,20 +98,33 @@ object DialKeepAlive {
         // ---- 常驻守护 ----
         append("cat > '").append(SCRIPT_PATH).append("' <<'SB_KEEPALIVE'\n")
         append("#!/system/bin/sh\n")
-        append("# 只为把包从「已停止」状态里拉回来：stopped 的包收不到静态广播\n")
+        // ksud 跑开机脚本时环境变量极简，PATH 里常常没有 /system/bin，sed / grep / setsid / cmd
+        // 会全部找不到 —— 这是「开机自启装了却不生效」最常见的原因，必须显式补上
+        append("PATH=/system/bin:/system/xbin:/sbin:/debug_ramdisk\n")
+        append("export PATH\n")
         append("PKG=").append(PACKAGE).append('\n')
         append("XML=/data/system/users/0/package-restrictions.xml\n")
         append("LOG=").append(SCRIPT_DIR).append("/keepalive.log\n")
+        // 诊断用：放到 /data/local/tmp，adb shell 也能读，出问题不用猜
+        append("DBG=/data/local/tmp/bakasu-daemon.log\n")
+        append("say() { printf '[%s] %s\\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" \"\$1\" >> \"\$DBG\" 2>/dev/null; }\n")
+        append("say \"started pid=\$\$ cgroup=\$(cat /proc/self/cgroup 2>/dev/null | tr '\\n' ' ')\"\n")
+        // ColorOS 划掉 App 用的是自家 o-stop，按 cgroup 杀进程；守护若还挂在 App 的 cgroup 里
+        // 会被连坐。这里尽量把自家人挪到系统组，被 SELinux 拦住就记一笔继续跑。
+        append("for cg in /sys/fs/cgroup/system /sys/fs/cgroup/system-background; do\n")
+        append("  if [ -w \"\$cg/cgroup.procs\" ] && echo \$\$ > \"\$cg/cgroup.procs\" 2>/dev/null; then\n")
+        append("    say \"moved to \$cg\"; break\n")
+        append("  fi\n")
+        append("done\n")
         append("stopped_now() {\n")
         append("  [ -f \"\$XML\" ] || return 1\n")
-        // 只在 <stopped-packages> 这一段里找：同一个 xml 的 <enabled-components> 也有包名，
-        // 全文件搜会永远为真，等于每 5 秒白跑一次 cmd
         append("  sed -n '/<stopped-packages/,/<\\/stopped-packages>/p' \"\$XML\" 2>/dev/null | grep -F -q \"\\\"\$PKG\\\"\"\n")
         append("}\n")
-        append("# 循环体第一轮立刻执行，所以「刚开机就拨号」不会撞在窗口里\n")
+        // 循环体第一轮立刻执行，所以「刚开机就拨号」不会撞在窗口里
         append("while true; do\n")
         append("  if stopped_now; then\n")
         append("    cmd package unstop \"\$PKG\" --user 0 >/dev/null 2>&1\n")
+        append("    say 'cleared stopped flag'\n")
         append("    printf '[%s] cleared stopped flag\\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" >> \"\$LOG\"\n")
         // 日志按 20KB 截一次，免得哪天一直清不掉把 /data 写满
         append("    if [ \"\$(wc -c < \"\$LOG\" 2>/dev/null || echo 0)\" -gt 20000 ]; then\n")
@@ -122,20 +135,33 @@ object DialKeepAlive {
         append("done\n")
         append("SB_KEEPALIVE\n")
         append("chmod 755 '").append(SCRIPT_PATH).append("'\n")
+        append("chmod 666 /data/local/tmp/bakasu-daemon.log 2>/dev/null\n")
 
         // ---- 开机自启（KernelSU 的 service.d，不依赖 App 存活）----
         append("cat > '").append(SERVICE_D_PATH).append("' <<'SB_SERVICE'\n")
         append("#!/system/bin/sh\n")
         append("# 开机把拨号守护拉起来；正式脚本在 /data/adb/bakasu/keepalive.sh\n")
-        append("setsid sh ").append(SCRIPT_PATH).append(" </dev/null >/dev/null 2>&1 &\n")
+        append("PATH=/system/bin:/system/xbin:/sbin:/debug_ramdisk\n")
+        append("export PATH\n")
+        append("D=/data/local/tmp/bakasu-daemon.log\n")
+        append("printf '[%s] service.d ran\\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" >> \"\$D\" 2>/dev/null\n")
+        append("chmod 666 \"\$D\" 2>/dev/null\n")
+        // 绝对路径，别赌 PATH
+        append("/system/bin/setsid /system/bin/sh ").append(SCRIPT_PATH).append(" </dev/null >/dev/null 2>&1 &\n")
+        append("printf '[%s] service.d spawned pid=%s\\n' \"\$(date '+%Y-%m-%d %H:%M:%S')\" \"\$!\" >> \"\$D\" 2>/dev/null\n")
         append("SB_SERVICE\n")
         append("chmod 755 '").append(SERVICE_D_PATH).append("'\n")
 
         // 顺手进 Doze 白名单，避免深度睡眠时广播被再压一层
         append("dumpsys deviceidle whitelist +").append(PACKAGE).append(" >/dev/null 2>&1\n")
+        // 第二层：进程已死时系统要「冷启动」本包来接广播，这一步会被后台运行 / 待机分组拦下
+        append("cmd appops set ").append(PACKAGE).append(" RUN_IN_BACKGROUND allow >/dev/null 2>&1\n")
+        append("cmd appops set ").append(PACKAGE).append(" RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1\n")
+        append("cmd appops set ").append(PACKAGE).append(" START_FOREGROUND allow >/dev/null 2>&1\n")
+        append("am set-standby-bucket ").append(PACKAGE).append(" active >/dev/null 2>&1\n")
         // 已经在跑就不再起第二个（两个循环会互相叠加，纯粹浪费电）
         append("pgrep -f ").append(MARKER).append(" >/dev/null 2>&1 || ")
-        append("setsid sh '").append(SCRIPT_PATH).append("' </dev/null >/dev/null 2>&1 &\n")
+        append("/system/bin/setsid /system/bin/sh '").append(SCRIPT_PATH).append("' </dev/null >/dev/null 2>&1 &\n")
     }
 
     private fun exec(ksuCli: KsuCliRepository, command: String): List<String> {

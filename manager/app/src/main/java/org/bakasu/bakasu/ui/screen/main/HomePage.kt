@@ -2,6 +2,7 @@ package org.bakasu.bakasu.ui.screen.main
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.system.Os
@@ -45,7 +46,6 @@ import androidx.compose.material.icons.twotone.Smartphone
 import androidx.compose.material.icons.twotone.Tag
 import androidx.compose.material.icons.twotone.TaskAlt
 import androidx.compose.material.icons.twotone.Tune
-import androidx.compose.material.icons.twotone.VolunteerActivism
 import androidx.compose.material.icons.twotone.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -712,7 +712,7 @@ fun LearnMoreCard(
 fun DonateCard(
     showIcon: Boolean,
 ) {
-    val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
     SegmentedColumn(
         modifier = Modifier.fillMaxWidth(),
         title = stringResource(R.string.home_support_title),
@@ -720,16 +720,47 @@ fun DonateCard(
     ) {
         item {
             SettingsBaseWidget(
-                icon = Icons.TwoTone.VolunteerActivism.takeIf { showIcon },
+                icon = Icons.TwoTone.Group.takeIf { showIcon },
                 iconPlaceholder = false,
                 title = stringResource(R.string.home_support_title),
                 description = stringResource(R.string.home_support_content),
                 onClick = {
-                    uriHandler.openUri("https://patreon.com/weishu")
+                    openQQGroup(context)
                 },
             )
         }
     }
+}
+
+// QQ 交流群【小尘的猪窝】：群号走 QQ 深链；未装 QQ 时用官方分享链接网页加群
+private const val QQ_GROUP_UIN = "1049800682"
+private const val QQ_GROUP_WEB =
+    "https://qun.qq.com/universal-share/share?ac=1&authKey=nrLcXyY4oPR8gJ8%2BDMi3z17mjWF4%2BQukjIDsO5R1wmpCohjqhZhFD1f1TnUquCJo&busi_data=eyJncm91cENvZGUiOiIxMDQ5ODAwNjgyIiwidG9rZW4iOiJTSW1QakErSlErbWxuY2NJWElGSzh5dm9xWWhvVFpKNS9jMnpvd2ZNUE1tUXJjNmI5bTA5TktsMWN3dTI5R2crIiwidWluIjoiNTU0NTkwNzc4In0%3D&data=7IFcoY9D3_Tu4-_aVFIqTdcR_XcNOLTWMqWmrG91dKlTfknDVYoLaQCfmp3nuMjkIFrKD5VqNNt0eQKjnRly0Q&svctype=4&tempid=h5_group_info"
+
+private fun openQQGroup(context: Context) {
+    val scheme =
+        "mqqapi://card/show_pslcard?src_type=internal&version=1&uin=$QQ_GROUP_UIN&card_type=group&source=qrcode"
+    val opened = runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(scheme)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }.isSuccess
+    if (opened) return
+
+    if (QQ_GROUP_WEB.isNotBlank()) {
+        val webOpened = runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(QQ_GROUP_WEB)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.isSuccess
+        if (webOpened) return
+    }
+
+    runCatching {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("QQ群", QQ_GROUP_UIN))
+    }
+    Toast.makeText(context, "未检测到 QQ，群号已复制：$QQ_GROUP_UIN", Toast.LENGTH_LONG).show()
 }
 
 @Composable

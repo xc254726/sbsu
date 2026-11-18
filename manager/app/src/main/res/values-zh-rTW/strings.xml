@@ -556,4 +556,28 @@
     <string name="listen_boot_summary">由模組在開機時啟動，滑掉或解除安裝管理器都不會停止；只有關閉上方開關才會停止。</string>
     <string name="listen_started">已開始監聽</string>
     <string name="listen_paused_toast">已暫停監聽</string>
+
+    <string name="listen_rules_empty">還沒有規則</string>
+    <string name="listen_rules_empty_summary">點「新增規則」，選擇應用、要輸入的字元，可再選一個腳本</string>
+    <string name="listen_rule_add">新增規則</string>
+    <string name="listen_rule_add_summary">選擇應用、要輸入的內容、延遲，可選一個腳本</string>
+    <string name="listen_rule_edit">編輯規則</string>
+    <string name="listen_rule_pick_app">點這裡選擇應用</string>
+    <string name="listen_rule_text">要輸入的內容</string>
+    <string name="listen_rule_input">輸入「%1$s」</string>
+    <string name="listen_rule_input_empty">不輸入文字</string>
+    <string name="listen_rule_delay">延遲（毫秒）</string>
+    <string name="listen_rule_script">腳本路徑（選填）</string>
+    <string name="listen_rule_browse">瀏覽</string>
+    <string name="listen_rule_save">儲存</string>
+    <string name="listen_rule_cancel">取消</string>
+    <string name="listen_rule_delete">刪除規則</string>
+    <string name="listen_rule_search">搜尋應用</string>
+    <string name="listen_rule_saved">規則已儲存</string>
+    <string name="listen_pick_app_first">請先選擇應用</string>
+    <string name="listen_boot_missing">開機腳本不存在，重新進入此頁面會自動修復。</string>
+    <string name="listen_remove_title">徹底移除內建服務</string>
+    <string name="listen_remove_summary">刪除 /data/adb 內的腳本與開機啟動項，監聽永久停止。</string>
+    <string name="listen_remove_confirm">確定刪除守護程序、開機腳本與所有規則？</string>
+    <string name="listen_removed">內建服務已移除</string>
 </resources>

@@ -689,4 +689,28 @@
     <string name="listen_boot_summary">由模块在开机时拉起，划掉或卸载管理器都不会停；只有关掉上面的开关才会停止。</string>
     <string name="listen_started">已开始监听</string>
     <string name="listen_paused_toast">已暂停监听</string>
+
+    <string name="listen_rules_empty">还没有规则</string>
+    <string name="listen_rules_empty_summary">点「添加规则」，选择应用、要输入的字符，可再选一个脚本</string>
+    <string name="listen_rule_add">添加规则</string>
+    <string name="listen_rule_add_summary">选择应用、要输入的内容、延迟，可选一个脚本</string>
+    <string name="listen_rule_edit">编辑规则</string>
+    <string name="listen_rule_pick_app">点这里选择应用</string>
+    <string name="listen_rule_text">要输入的内容</string>
+    <string name="listen_rule_input">输入「%1$s」</string>
+    <string name="listen_rule_input_empty">不输入文字</string>
+    <string name="listen_rule_delay">延迟（毫秒）</string>
+    <string name="listen_rule_script">脚本路径（可选）</string>
+    <string name="listen_rule_browse">浏览</string>
+    <string name="listen_rule_save">保存</string>
+    <string name="listen_rule_cancel">取消</string>
+    <string name="listen_rule_delete">删除规则</string>
+    <string name="listen_rule_search">搜索应用</string>
+    <string name="listen_rule_saved">规则已保存</string>
+    <string name="listen_pick_app_first">先选一个应用</string>
+    <string name="listen_boot_missing">开机脚本不在了，重新进一次这个页面会自动修复。</string>
+    <string name="listen_remove_title">彻底移除内置服务</string>
+    <string name="listen_remove_summary">删除 /data/adb 里的脚本和开机启动项，监听永久停止。</string>
+    <string name="listen_remove_confirm">确定删除守护进程、开机脚本和所有规则？</string>
+    <string name="listen_removed">内置服务已移除</string>
 </resources>

@@ -693,4 +693,28 @@
     <string name="listen_boot_summary">Started by the module at boot. Swiping away or uninstalling the manager does not stop it; only the switch above does.</string>
     <string name="listen_started">Listening started</string>
     <string name="listen_paused_toast">Listening paused</string>
+
+    <string name="listen_rules_empty">No rules yet</string>
+    <string name="listen_rules_empty_summary">Tap “Add rule” to pick an app, the text to type and an optional script.</string>
+    <string name="listen_rule_add">Add rule</string>
+    <string name="listen_rule_add_summary">Pick an app, the text to type, a delay and an optional script</string>
+    <string name="listen_rule_edit">Edit rule</string>
+    <string name="listen_rule_pick_app">Tap to pick an app</string>
+    <string name="listen_rule_text">Text to type</string>
+    <string name="listen_rule_input">Types “%1$s”</string>
+    <string name="listen_rule_input_empty">No text</string>
+    <string name="listen_rule_delay">Delay (ms)</string>
+    <string name="listen_rule_script">Script path (optional)</string>
+    <string name="listen_rule_browse">Browse</string>
+    <string name="listen_rule_save">Save</string>
+    <string name="listen_rule_cancel">Cancel</string>
+    <string name="listen_rule_delete">Delete rule</string>
+    <string name="listen_rule_search">Search apps</string>
+    <string name="listen_rule_saved">Rules saved</string>
+    <string name="listen_pick_app_first">Pick an app first</string>
+    <string name="listen_boot_missing">Boot script is missing. Re-enter this page to repair it.</string>
+    <string name="listen_remove_title">Remove built-in service</string>
+    <string name="listen_remove_summary">Deletes the scripts in /data/adb and the boot entry. The listener stops for good.</string>
+    <string name="listen_remove_confirm">Remove the daemon, the boot script and all rules?</string>
+    <string name="listen_removed">Built-in service removed</string>
 </resources>

@@ -770,8 +770,6 @@ private fun InfoCard(
     isSimpleMode: Boolean,
     showHomeCardIcons: Boolean,
 ) {
-    val managersList = systemInfo.managersList
-
     SegmentedColumn(
         title = stringResource(R.string.home_version_info),
         modifier = Modifier.fillMaxWidth(),
@@ -866,56 +864,6 @@ private fun InfoCard(
                 iconPlaceholder = false,
                 title = stringResource(R.string.home_seccomp_status),
                 description = seccompDisplay,
-            )
-        }
-
-        item(
-            visible = !isSimpleMode && managersList != null,
-        ) {
-            val signatureMap =
-                managersList?.managers.orEmpty().groupBy { it.signatureIndex }
-            val managersText = buildString {
-                signatureMap.toSortedMap().forEach { (signatureIndex, managers) ->
-                    append(managers.joinToString(", ") { "UID: ${it.uid}" })
-                    append(" ")
-                    append(
-                        when (signatureIndex) {
-                            0 -> "(${stringResource(R.string.app_name)})"
-
-                            255 -> "(${stringResource(R.string.dynamic_managerature)})"
-
-                            else -> if (signatureIndex >= 1) {
-                                "(${
-                                    stringResource(
-                                        R.string.signature_index,
-                                        signatureIndex,
-                                    )
-                                })"
-                            } else {
-                                "(${stringResource(R.string.unknown_signature)})"
-                            }
-                        },
-                    )
-                    append(" | ")
-                }
-            }.trimEnd(' ', '|')
-
-            SettingsBaseWidget(
-                icon = Icons.TwoTone.Group.takeIf { showHomeCardIcons },
-                iconPlaceholder = false,
-                title = stringResource(R.string.multi_manager_list),
-                description = managersText.ifEmpty { stringResource(R.string.no_active_manager) },
-            )
-        }
-
-        item(
-            visible = !isSimpleMode && systemStatus.isFullFeatured,
-        ) {
-            SettingsBaseWidget(
-                icon = Icons.TwoTone.Tune.takeIf { showHomeCardIcons },
-                iconPlaceholder = false,
-                title = stringResource(R.string.home_hook_type),
-                description = systemStatus.hookType,
             )
         }
 

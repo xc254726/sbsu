@@ -676,4 +676,21 @@
     <string name="superuser_root_access_required">Root access is required to load applications.</string>
     <string name="superuser_service_start_failed">RootService failed to start. Retry to load applications.</string>
     <string name="superuser_packages_load_failed">Failed to load applications from RootService. Please retry.</string>
+
+    <string name="listen_title">Listen</string>
+    <string name="listen_settings_summary">Runs scripts and types text on app launch. Survives reboot.</string>
+    <string name="listen_loading">Reading status…</string>
+    <string name="listen_working">Working…</string>
+    <string name="listen_running">Running · keeps running after reboot</string>
+    <string name="listen_paused">Paused · will not start after reboot</string>
+    <string name="listen_idle">Not running · turn the switch on to start</string>
+    <string name="listen_not_installed">Module sb-autotype not found. Install it from the Modules page first.</string>
+    <string name="listen_rule_group">Rules</string>
+    <string name="listen_rules_title">Apps &amp; scripts</string>
+    <string name="listen_rules_summary">%1$d rule(s). Tap to pick apps and scripts.</string>
+    <string name="listen_about_group">Details</string>
+    <string name="listen_boot_title">Start on boot</string>
+    <string name="listen_boot_summary">Started by the module at boot. Swiping away or uninstalling the manager does not stop it; only the switch above does.</string>
+    <string name="listen_started">Listening started</string>
+    <string name="listen_paused_toast">Listening paused</string>
 </resources>

@@ -672,4 +672,21 @@
     <string name="superuser_root_access_required">加载应用列表需要 Root 权限。</string>
     <string name="superuser_service_start_failed">RootService 启动失败，请重试以加载应用列表。</string>
     <string name="superuser_packages_load_failed">从 RootService 加载应用列表失败，请重试。</string>
+
+    <string name="listen_title">监听</string>
+    <string name="listen_settings_summary">打开应用后自动跑脚本并输入内容，重启不受影响</string>
+    <string name="listen_loading">读取状态…</string>
+    <string name="listen_working">处理中…</string>
+    <string name="listen_running">运行中 · 重启后照样运行</string>
+    <string name="listen_paused">已暂停 · 重启也不会启动</string>
+    <string name="listen_idle">未运行 · 打开开关即启动</string>
+    <string name="listen_not_installed">没检测到 sb-autotype 模块，请先在「模块」里安装</string>
+    <string name="listen_rule_group">规则</string>
+    <string name="listen_rules_title">应用与脚本</string>
+    <string name="listen_rules_summary">已配置 %1$d 条规则，点这里选择应用和脚本</string>
+    <string name="listen_about_group">说明</string>
+    <string name="listen_boot_title">开机自动运行</string>
+    <string name="listen_boot_summary">由模块在开机时拉起，划掉或卸载管理器都不会停；只有关掉上面的开关才会停止。</string>
+    <string name="listen_started">已开始监听</string>
+    <string name="listen_paused_toast">已暂停监听</string>
 </resources>

@@ -90,6 +90,7 @@ import org.bakasu.bakasu.ui.screen.UmountManagerScreen
 import org.bakasu.bakasu.ui.screen.about.AboutScreen
 import org.bakasu.bakasu.ui.screen.about.OpenSourceLicenseScreen
 import org.bakasu.bakasu.ui.screen.kernelFlash.KernelFlashScreen
+import org.bakasu.bakasu.ui.screen.listen.ListenScreen
 import org.bakasu.bakasu.ui.screen.main.MainScreen
 import org.bakasu.bakasu.ui.screen.moduleRepo.AddRepositoryScreen
 import org.bakasu.bakasu.ui.screen.moduleRepo.ModuleRepoScreen
@@ -576,6 +577,17 @@ fun NavContainer(
                     useBlur = useBlur,
                 ) {
                     UmountManagerScreen()
+                }
+            }
+            entry<Route.Listen>(swipeDismiss = swipeBackDirection) {
+                ManagerNavEntry(
+                    interceptPredictiveBack = interceptPredictiveBack,
+                    onBack = onBack,
+                    themeConfig = themeConfig,
+                    backgroundRenderState = backgroundRenderState,
+                    useBlur = useBlur,
+                ) {
+                    ListenScreen()
                 }
             }
             entry<Route.DynamicManager>(swipeDismiss = swipeBackDirection) {

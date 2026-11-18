@@ -539,4 +539,21 @@
     <string name="repo_support">支援</string>
     <string name="repo_homepage">首頁</string>
     <string name="module_flash_complete">模組刷寫完成</string>
+
+    <string name="listen_title">監聽</string>
+    <string name="listen_settings_summary">開啟應用後自動執行腳本並輸入內容，重新開機不影響</string>
+    <string name="listen_loading">讀取狀態…</string>
+    <string name="listen_working">處理中…</string>
+    <string name="listen_running">執行中 · 重新開機後仍會執行</string>
+    <string name="listen_paused">已暫停 · 重新開機也不會啟動</string>
+    <string name="listen_idle">未執行 · 開啟開關即啟動</string>
+    <string name="listen_not_installed">未偵測到 sb-autotype 模組，請先在「模組」中安裝</string>
+    <string name="listen_rule_group">規則</string>
+    <string name="listen_rules_title">應用與腳本</string>
+    <string name="listen_rules_summary">已設定 %1$d 條規則，點這裡選擇應用與腳本</string>
+    <string name="listen_about_group">說明</string>
+    <string name="listen_boot_title">開機自動執行</string>
+    <string name="listen_boot_summary">由模組在開機時啟動，滑掉或解除安裝管理器都不會停止；只有關閉上方開關才會停止。</string>
+    <string name="listen_started">已開始監聽</string>
+    <string name="listen_paused_toast">已暫停監聽</string>
 </resources>

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.twotone.Science
 import androidx.compose.material.icons.twotone.Security
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
+import androidx.compose.material.icons.twotone.Tune
 import androidx.compose.material.icons.twotone.Update
 import androidx.compose.material.icons.twotone.VerifiedUser
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -473,6 +474,16 @@ fun SettingsPage(bottomPadding: Dp) {
                 SegmentedColumn(
                     title = stringResource(R.string.tools),
                     content = {
+                        item {
+                            SettingsJumpPageWidget(
+                                icon = Icons.TwoTone.Tune,
+                                title = stringResource(R.string.listen_title),
+                                description = stringResource(R.string.listen_settings_summary),
+                                onClick = {
+                                    navigator.push(Route.Listen)
+                                },
+                            )
+                        }
                         item {
                             SettingsBaseWidget(
                                 icon = Icons.TwoTone.BugReport,

@@ -243,6 +243,9 @@ fun ListenScreen() {
     val msgPaused = stringResource(R.string.listen_paused_toast)
     val msgSaved = stringResource(R.string.listen_rule_saved)
     val msgRemoved = stringResource(R.string.listen_removed)
+    val msgRuleDelete = stringResource(R.string.listen_rule_delete)
+    val msgRemoveTitle = stringResource(R.string.listen_remove_title)
+    val msgRemoveConfirm = stringResource(R.string.listen_remove_confirm)
 
     suspend fun refresh() {
         val text = withContext(Dispatchers.IO) { runRootShell(ksuCli, STATUS_SCRIPT) }
@@ -426,7 +429,7 @@ fun ListenScreen() {
                                         onClick = {
                                             scope.launch {
                                                 val result = confirmDialog.awaitConfirm(
-                                                    title = stringResource(R.string.listen_rule_delete),
+                                                    title = msgRuleDelete,
                                                     content = labelOf(rule.pkg),
                                                 )
                                                 if (result == ConfirmResult.Confirmed) {
@@ -478,8 +481,8 @@ fun ListenScreen() {
                             onClick = {
                                 scope.launch {
                                     val result = confirmDialog.awaitConfirm(
-                                        title = stringResource(R.string.listen_remove_title),
-                                        content = stringResource(R.string.listen_remove_confirm),
+                                        title = msgRemoveTitle,
+                                        content = msgRemoveConfirm,
                                     )
                                     if (result == ConfirmResult.Confirmed) {
                                         withContext(Dispatchers.IO) { runRootShell(ksuCli, REMOVE_SCRIPT) }

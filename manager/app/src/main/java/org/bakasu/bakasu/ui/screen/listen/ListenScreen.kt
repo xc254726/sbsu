@@ -722,12 +722,14 @@ private fun AppPickerContent(
     onPick: (PmApp) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    val filtered = remember(apps, query) {
+    // 只列用户自己装的应用，系统应用不显示
+    val userApps = remember(apps) { apps.filter { !it.system } }
+    val filtered = remember(userApps, query) {
         val q = query.trim().lowercase()
         if (q.isEmpty()) {
-            apps
+            userApps
         } else {
-            apps.filter { it.label.lowercase().contains(q) || it.pkg.lowercase().contains(q) }
+            userApps.filter { it.label.lowercase().contains(q) || it.pkg.lowercase().contains(q) }
         }
     }
 
@@ -737,7 +739,7 @@ private fun AppPickerContent(
             onValueChange = { query = it },
             label = {
                 Text(
-                    stringResource(R.string.listen_rule_search) + " (" + apps.size + ")",
+                    stringResource(R.string.listen_rule_search) + " (" + userApps.size + ")",
                 )
             },
             singleLine = true,
@@ -747,7 +749,7 @@ private fun AppPickerContent(
 
         if (filtered.isEmpty()) {
             Text(
-                text = if (apps.isEmpty()) {
+                text = if (userApps.isEmpty()) {
                     stringResource(R.string.listen_apps_empty)
                 } else {
                     stringResource(R.string.listen_apps_no_match)
@@ -784,15 +786,6 @@ private fun AppPickerContent(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        if (app.system) {
-                            Text(
-                                text = app.pkg,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
                     }
                 }
             }

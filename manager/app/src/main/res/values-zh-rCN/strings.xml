@@ -719,4 +719,5 @@
     <string name="listen_files_empty">这里没有子目录或 .sh 脚本</string>
     <string name="listen_apps_no_match">没有匹配的应用</string>
     <string name="listen_apps_reload">重新加载</string>
+    <string name="listen_rule_change_app">更换</string>
 </resources>

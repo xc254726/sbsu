@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -33,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -635,32 +637,39 @@ private fun RuleEditContent(
 ) {
     Column(
         modifier = Modifier
-            .verticalScroll(rememberScrollState())
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(MaterialTheme.shapes.medium)
-                .clickable { onPickApp() }
-                .padding(vertical = 8.dp, horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (rule.pkg.isNotBlank()) {
-                PackageIcon(rule.pkg, null, Modifier.size(34.dp))
-                Spacer(Modifier.width(10.dp))
+        if (rule.pkg.isBlank()) {
+            OutlinedButton(
+                onClick = onPickApp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+            ) {
+                Icon(Icons.TwoTone.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.listen_rule_pick_app))
             }
-            Column(Modifier.fillMaxWidth()) {
-                Text(
-                    text = if (rule.pkg.isBlank()) {
-                        stringResource(R.string.listen_rule_pick_app)
-                    } else {
-                        labelOf(rule.pkg)
-                    },
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                if (rule.pkg.isNotBlank()) {
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .clickable { onPickApp() }
+                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PackageIcon(rule.pkg, null, Modifier.size(36.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = labelOf(rule.pkg),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         text = rule.pkg,
                         style = MaterialTheme.typography.bodySmall,
@@ -668,6 +677,9 @@ private fun RuleEditContent(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+                TextButton(onClick = onPickApp) {
+                    Text(stringResource(R.string.listen_rule_change_app))
                 }
             }
         }

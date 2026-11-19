@@ -723,4 +723,5 @@
     <string name="listen_files_empty">No folders or .sh files here</string>
     <string name="listen_apps_no_match">No matching app</string>
     <string name="listen_apps_reload">Reload</string>
+    <string name="listen_rule_change_app">Change</string>
 </resources>

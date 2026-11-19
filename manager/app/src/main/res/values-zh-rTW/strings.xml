@@ -586,4 +586,5 @@
     <string name="listen_files_empty">這裡沒有子目錄或 .sh 腳本</string>
     <string name="listen_apps_no_match">沒有符合的應用</string>
     <string name="listen_apps_reload">重新載入</string>
+    <string name="listen_rule_change_app">更換</string>
 </resources>

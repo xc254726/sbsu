@@ -572,6 +572,29 @@ static int my_sel_open_handle_status(struct inode *inode, struct file *filp)
     if (likely(ksu_get_uid_t(current_uid()) >= 10000 && ksu_selinux_hide_enabled)) {
         void *data = fake_status;
         if (data) {
+            /*
+             * Serve a live page instead of the boot-time snapshot: let the
+             * original handler resolve the real status page, mirror it, and
+             * only re-pin the counters that would reveal the extra policy
+             * loads we did. Everything else (enforcing, deny_unknown, ...)
+             * keeps tracking the kernel so a cross-check against
+             * /sys/fs/selinux/enforce still matches.
+             */
+            if (!orig_sel_open_handle_status(inode, filp)) {
+                struct page *live = filp->private_data;
+                if (live && live != data) {
+                    struct selinux_kernel_status *src = page_address(live);
+                    struct selinux_kernel_status *dst = page_address(data);
+                    struct selinux_kernel_status tmp;
+
+                    if (src) {
+                        memcpy(&tmp, src, sizeof(tmp));
+                        tmp.sequence = dst->sequence;
+                        tmp.policyload = dst->policyload;
+                        memcpy(dst, &tmp, sizeof(tmp));
+                    }
+                }
+            }
             filp->private_data = data;
             return 0;
         }
@@ -659,6 +682,49 @@ extern void ksu_register_setprocattr_lsm_hook();
     do {                                                                                                               \
     } while (0)
 #endif // #ifndef KSU_COMPAT_HAS_SUSFS_FEATURE_SELINUX_HIDE
+
+/*
+ * The backup sidtab we serve to app UIDs starts with initial SIDs only, so the
+ * first lookup of any real context has to allocate and insert an entry. That
+ * makes a fresh context measurably slower than the same context on the live
+ * sidtab, which is exactly the kind of first/second-call asymmetry side-channel
+ * probes look for. Warm the common app contexts while enabling.
+ */
+static const char *const ksu_selinux_hide_preheat_contexts[] = {
+    "u:r:untrusted_app:s0",
+    "u:r:untrusted_app_27:s0",
+    "u:r:untrusted_app_29:s0",
+    "u:r:untrusted_app_30:s0",
+    "u:r:untrusted_app_32:s0",
+    "u:r:untrusted_app_34:s0",
+    "u:r:untrusted_app_35:s0",
+    "u:r:app_zygote:s0",
+    "u:r:system_app:s0",
+    "u:r:priv_app:s0",
+    "u:r:platform_app:s0",
+    "u:r:isolated_app:s0",
+    "u:r:su:s0",
+    "u:object_r:rootfs:s0",
+};
+
+static void ksu_selinux_hide_preheat_sidtab(void)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) || defined(KSU_COMPAT_HAS_SELINUX_POLICY_STRUCT)
+    int i;
+
+    if (!backup_sepolicy)
+        return;
+
+    for (i = 0; i < (int)(sizeof(ksu_selinux_hide_preheat_contexts) / sizeof(ksu_selinux_hide_preheat_contexts[0])); i++) {
+        const char *ctx = ksu_selinux_hide_preheat_contexts[i];
+        u32 sid = 0;
+
+        /* Failures are expected for domains this kernel does not ship. */
+        security_context_to_sid_with_policy(backup_sepolicy, ctx, strlen(ctx), &sid, SECSID_NULL, GFP_KERNEL, NULL,
+                                            NULL);
+    }
+#endif
+}
 
 static int ksu_selinux_hide_enable()
 {
@@ -841,6 +907,7 @@ out:
 
 #endif // #ifndef KSU_COMPAT_HAS_SUSFS_FEATURE_SELINUX_HIDE
 
+    ksu_selinux_hide_preheat_sidtab();
     return 0;
 
 #ifndef KSU_COMPAT_HAS_SUSFS_FEATURE_SELINUX_HIDE

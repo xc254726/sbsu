@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Base64
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -46,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -132,6 +132,8 @@ echo REMOVED
 """
 
 private const val READ_VERSION_SCRIPT = "cat /data/adb/sb_autotype/version 2>/dev/null"
+
+private enum class RuleDialogMode { Edit, Apps, Files }
 
 private data class ListenRule(
     val pkg: String,
@@ -236,8 +238,7 @@ fun ListenScreen() {
     var busy by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf<ListenRule?>(null) }
     var draftIndex by remember { mutableStateOf(-1) }
-    var pickingApp by remember { mutableStateOf(false) }
-    var pickingScript by remember { mutableStateOf(false) }
+    var dialogMode by remember { mutableStateOf(RuleDialogMode.Edit) }
 
     val msgStart = stringResource(R.string.listen_started)
     val msgPaused = stringResource(R.string.listen_paused_toast)
@@ -499,150 +500,173 @@ fun ListenScreen() {
         }
     }
 
-    draft?.let { current ->
-        RuleEditorDialog(
-            rule = current,
-            labelOf = labelOf,
-            onChange = { draft = it },
-            onPickApp = { pickingApp = true },
-            onPickScript = { pickingScript = true },
-            onDismiss = { draft = null },
-            onSave = {
-                if (current.pkg.isBlank()) {
-                    scope.launch {
-                        snackBarHost.showReplacingSnackbar(context.getString(R.string.listen_pick_app_first))
-                    }
-                } else {
-                    val next = rules.toMutableList()
-                    if (draftIndex in next.indices) next[draftIndex] = current else next.add(current)
-                    scope.launch {
-                        saveRules(next)
-                        draft = null
-                    }
+    val current = draft
+    if (current != null) {
+        AlertDialog(
+            onDismissRequest = {
+                draft = null
+                dialogMode = RuleDialogMode.Edit
+            },
+            title = {
+                Text(
+                    when (dialogMode) {
+                        RuleDialogMode.Apps -> stringResource(R.string.listen_rule_pick_app)
+                        RuleDialogMode.Files -> stringResource(R.string.listen_rule_script)
+                        else -> stringResource(R.string.listen_rule_edit)
+                    },
+                )
+            },
+            text = {
+                when (dialogMode) {
+                    RuleDialogMode.Apps -> AppPickerContent(
+                        packages = packages,
+                        onPick = { info ->
+                            draft = current.copy(pkg = info.packageName)
+                            dialogMode = RuleDialogMode.Edit
+                        },
+                    )
+
+                    RuleDialogMode.Files -> ScriptPickerContent(
+                        rootFiles = rootFiles,
+                        onPick = { picked ->
+                            draft = current.copy(script = picked)
+                            dialogMode = RuleDialogMode.Edit
+                        },
+                    )
+
+                    else -> RuleEditContent(
+                        rule = current,
+                        labelOf = labelOf,
+                        onChange = { draft = it },
+                        onPickApp = {
+                            dialogMode = RuleDialogMode.Apps
+                            scope.launch { installedPackages.refresh() }
+                        },
+                        onPickScript = { dialogMode = RuleDialogMode.Files },
+                    )
                 }
             },
-        )
-    }
+            confirmButton = {
+                when (dialogMode) {
+                    RuleDialogMode.Edit -> TextButton(
+                        onClick = {
+                            if (current.pkg.isBlank()) {
+                                scope.launch {
+                                    snackBarHost.showReplacingSnackbar(context.getString(R.string.listen_pick_app_first))
+                                }
+                            } else {
+                                val next = rules.toMutableList()
+                                if (draftIndex in next.indices) {
+                                    next[draftIndex] = current
+                                } else {
+                                    next.add(current)
+                                }
+                                scope.launch {
+                                    saveRules(next)
+                                    draft = null
+                                    dialogMode = RuleDialogMode.Edit
+                                }
+                            }
+                        },
+                    ) { Text(stringResource(R.string.listen_rule_save)) }
 
-    if (pickingApp) {
-        AppPickerDialog(
-            packages = packages,
-            onDismiss = { pickingApp = false },
-            onPick = { info ->
-                draft = draft?.copy(pkg = info.packageName)
-                pickingApp = false
+                    else -> TextButton(
+                        onClick = { dialogMode = RuleDialogMode.Edit },
+                    ) { Text(stringResource(R.string.listen_rule_back)) }
+                }
             },
-        )
-    }
-
-    if (pickingScript) {
-        ScriptPickerDialog(
-            rootFiles = rootFiles,
-            onDismiss = { pickingScript = false },
-            onPick = { path ->
-                draft = draft?.copy(script = path)
-                pickingScript = false
+            dismissButton = {
+                if (dialogMode == RuleDialogMode.Edit) {
+                    TextButton(onClick = { draft = null }) {
+                        Text(stringResource(R.string.listen_rule_cancel))
+                    }
+                }
             },
         )
     }
 }
 
 @Composable
-private fun RuleEditorDialog(
+private fun RuleEditContent(
     rule: ListenRule,
     labelOf: (String) -> String,
     onChange: (ListenRule) -> Unit,
     onPickApp: () -> Unit,
     onPickScript: () -> Unit,
-    onDismiss: () -> Unit,
-    onSave: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.listen_rule_edit)) },
-        text = {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onPickApp() },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (rule.pkg.isNotBlank()) {
-                        PackageIcon(rule.pkg, null, Modifier.size(34.dp))
-                        Spacer(Modifier.width(10.dp))
-                    }
-                    Column(Modifier.fillMaxWidth()) {
-                        Text(
-                            text = if (rule.pkg.isBlank()) {
-                                stringResource(R.string.listen_rule_pick_app)
-                            } else {
-                                labelOf(rule.pkg)
-                            },
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        if (rule.pkg.isNotBlank()) {
-                            Text(
-                                text = rule.pkg,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = rule.text,
-                    onValueChange = { onChange(rule.copy(text = it)) },
-                    label = { Text(stringResource(R.string.listen_rule_text)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                OutlinedTextField(
-                    value = rule.delay,
-                    onValueChange = { value ->
-                        onChange(rule.copy(delay = value.filter { it.isDigit() }))
-                    },
-                    label = { Text(stringResource(R.string.listen_rule_delay)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                OutlinedTextField(
-                    value = rule.script,
-                    onValueChange = { onChange(rule.copy(script = it)) },
-                    label = { Text(stringResource(R.string.listen_rule_script)) },
-                    singleLine = true,
-                    trailingIcon = {
-                        TextButton(onClick = onPickScript) {
-                            Text(stringResource(R.string.listen_rule_browse))
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+    Column(
+        modifier = Modifier
+            .verticalScroll(rememberScrollState())
+            .fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .clickable { onPickApp() }
+                .padding(vertical = 8.dp, horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (rule.pkg.isNotBlank()) {
+                PackageIcon(rule.pkg, null, Modifier.size(34.dp))
+                Spacer(Modifier.width(10.dp))
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onSave) { Text(stringResource(R.string.listen_rule_save)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.listen_rule_cancel)) }
-        },
-    )
+            Column(Modifier.fillMaxWidth()) {
+                Text(
+                    text = if (rule.pkg.isBlank()) {
+                        stringResource(R.string.listen_rule_pick_app)
+                    } else {
+                        labelOf(rule.pkg)
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                if (rule.pkg.isNotBlank()) {
+                    Text(
+                        text = rule.pkg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = rule.text,
+            onValueChange = { onChange(rule.copy(text = it)) },
+            label = { Text(stringResource(R.string.listen_rule_text)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = rule.delay,
+            onValueChange = { value -> onChange(rule.copy(delay = value.filter { it.isDigit() })) },
+            label = { Text(stringResource(R.string.listen_rule_delay)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = rule.script,
+            onValueChange = { onChange(rule.copy(script = it)) },
+            label = { Text(stringResource(R.string.listen_rule_script)) },
+            singleLine = true,
+            trailingIcon = {
+                TextButton(onClick = onPickScript) {
+                    Text(stringResource(R.string.listen_rule_browse))
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable
-private fun AppPickerDialog(
+private fun AppPickerContent(
     packages: List<InstalledPackageInfo>,
-    onDismiss: () -> Unit,
     onPick: (InstalledPackageInfo) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -656,55 +680,54 @@ private fun AppPickerDialog(
             .sortedWith(compareBy({ it.appLabel.firstOrNull()?.code ?: 0 }, { it.appLabel }))
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.listen_rule_pick_app)) },
-        text = {
-            Column(Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text(stringResource(R.string.listen_rule_search)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.size(8.dp))
-                LazyColumn(
+    Column(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text(stringResource(R.string.listen_rule_search)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.size(8.dp))
+        if (filtered.isEmpty()) {
+            Text(
+                text = stringResource(R.string.listen_apps_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 16.dp),
+            )
+            return@Column
+        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 380.dp),
+        ) {
+            items(filtered, key = { it.packageName }) { info ->
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 380.dp),
+                        .clickable { onPick(info) }
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    items(filtered, key = { it.packageName }) { info ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPick(info) }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            PackageIcon(info.packageName, null, Modifier.size(34.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = info.appLabel.ifBlank { info.packageName },
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    PackageIcon(info.packageName, null, Modifier.size(34.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = info.appLabel.ifBlank { info.packageName },
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.listen_rule_cancel)) }
-        },
-    )
+        }
+    }
 }
 
 @Composable
-private fun ScriptPickerDialog(
+private fun ScriptPickerContent(
     rootFiles: RootFileRepository,
-    onDismiss: () -> Unit,
     onPick: (String) -> Unit,
 ) {
     var path by remember { mutableStateOf("/sdcard") }
@@ -725,68 +748,62 @@ private fun ScriptPickerDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.listen_rule_script)) },
-        text = {
-            Column(Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
-                        onClick = {
-                            if (path != "/") {
-                                path = path.substringBeforeLast('/', "/").ifEmpty { "/" }
-                            }
-                        },
-                    ) { Text("..") }
-                    Text(
-                        text = path,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                error?.let {
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                LazyColumn(
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = {
+                    if (path != "/") {
+                        path = path.substringBeforeLast('/', "/").ifEmpty { "/" }
+                    }
+                },
+            ) { Text("..") }
+            Text(
+                text = path,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        error?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (entries.isEmpty()) {
+            Text(
+                text = stringResource(R.string.listen_files_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 16.dp),
+            )
+            return@Column
+        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp),
+        ) {
+            items(entries, key = { it.path }) { entry ->
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 360.dp),
-                ) {
-                    items(entries, key = { it.path }) { entry ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (entry.isDirectory) {
-                                        path = entry.path
-                                    } else {
-                                        onPick(entry.path)
-                                    }
-                                }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Box(Modifier.weight(1f)) {
-                                Text(
-                                    text = if (entry.isDirectory) "${entry.name}/" else entry.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
+                        .clickable {
+                            if (entry.isDirectory) path = entry.path else onPick(entry.path)
                         }
-                    }
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (entry.isDirectory) "${entry.name}/" else entry.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.listen_rule_cancel)) }
-        },
-    )
+        }
+    }
 }

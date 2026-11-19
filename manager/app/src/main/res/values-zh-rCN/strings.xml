@@ -713,4 +713,8 @@
     <string name="listen_remove_summary">删除 /data/adb 里的脚本和开机启动项，监听永久停止。</string>
     <string name="listen_remove_confirm">确定删除守护进程、开机脚本和所有规则？</string>
     <string name="listen_removed">内置服务已移除</string>
+
+    <string name="listen_rule_back">返回</string>
+    <string name="listen_apps_empty">应用列表是空的，退出这个页面重新进来一次就会重新加载。</string>
+    <string name="listen_files_empty">这里没有子目录或 .sh 脚本</string>
 </resources>

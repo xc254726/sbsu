@@ -717,4 +717,8 @@
     <string name="listen_remove_summary">Deletes the scripts in /data/adb and the boot entry. The listener stops for good.</string>
     <string name="listen_remove_confirm">Remove the daemon, the boot script and all rules?</string>
     <string name="listen_removed">Built-in service removed</string>
+
+    <string name="listen_rule_back">Back</string>
+    <string name="listen_apps_empty">App list is empty. Close this page and open it again to reload.</string>
+    <string name="listen_files_empty">No folders or .sh files here</string>
 </resources>

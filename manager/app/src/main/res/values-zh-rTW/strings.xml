@@ -580,4 +580,8 @@
     <string name="listen_remove_summary">刪除 /data/adb 內的腳本與開機啟動項，監聽永久停止。</string>
     <string name="listen_remove_confirm">確定刪除守護程序、開機腳本與所有規則？</string>
     <string name="listen_removed">內建服務已移除</string>
+
+    <string name="listen_rule_back">返回</string>
+    <string name="listen_apps_empty">應用列表是空的，離開此頁面再進入一次就會重新載入。</string>
+    <string name="listen_files_empty">這裡沒有子目錄或 .sh 腳本</string>
 </resources>

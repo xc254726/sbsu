@@ -710,19 +710,23 @@ static const char *const ksu_selinux_hide_preheat_contexts[] = {
 static void ksu_selinux_hide_preheat_sidtab(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) || defined(KSU_COMPAT_HAS_SELINUX_POLICY_STRUCT)
-    int i;
+    int i, warmed = 0;
+    int total = (int)(sizeof(ksu_selinux_hide_preheat_contexts) / sizeof(ksu_selinux_hide_preheat_contexts[0]));
 
     if (!backup_sepolicy)
         return;
 
-    for (i = 0; i < (int)(sizeof(ksu_selinux_hide_preheat_contexts) / sizeof(ksu_selinux_hide_preheat_contexts[0])); i++) {
+    for (i = 0; i < total; i++) {
         const char *ctx = ksu_selinux_hide_preheat_contexts[i];
         u32 sid = 0;
 
         /* Failures are expected for domains this kernel does not ship. */
-        security_context_to_sid_with_policy(backup_sepolicy, ctx, strlen(ctx), &sid, SECSID_NULL, GFP_KERNEL, NULL,
-                                            NULL);
+        if (!security_context_to_sid_with_policy(backup_sepolicy, ctx, strlen(ctx), &sid, SECSID_NULL, GFP_KERNEL, NULL,
+                                                 NULL))
+            warmed++;
     }
+
+    pr_info("selinux_hide: warmed %d/%d backup sidtab contexts\n", warmed, total);
 #endif
 }
 

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.bakasu.bakasu.R
+import org.bakasu.bakasu.data.settings.SelinuxHidePendingStore
 import org.bakasu.bakasu.domain.model.AppearanceSetting
 import org.bakasu.bakasu.domain.model.PlatformSetting
 import org.bakasu.bakasu.domain.model.SettingsPlatformSnapshot
@@ -102,6 +103,7 @@ data class SettingsUiState(
     val isSuLogEnabled: Boolean = false,
     val selinuxHideStatus: String = "",
     val isSelinuxHideEnabled: Boolean = false,
+    val selinuxHidePending: Boolean = false,
     val defaultUmountModules: Boolean = false,
     val useBuiltinMonoFont: Boolean = false,
     val useSoftReboot: Boolean = false,
@@ -234,6 +236,7 @@ class SettingsViewModel(
                     },
                     selinuxHideStatus = platform.selinuxHideStatus,
                     isSelinuxHideEnabled = features.selinuxHideEnabled,
+                    selinuxHidePending = SelinuxHidePendingStore.isPending(),
                     defaultUmountModules = features.defaultUmountModules,
                 )
             }
@@ -429,13 +432,21 @@ class SettingsViewModel(
     fun handleSelinuxHideChange(checked: Boolean) {
         viewModelScope.launch {
             val status = setSelinuxHideEnabled(checked)
-            mutableState.update { it.copy(isSelinuxHideEnabled = checked) }
             when (status) {
-                0 -> Unit
+                0 -> {
+                    SelinuxHidePendingStore.clear()
+                    mutableState.update { it.copy(isSelinuxHideEnabled = checked, selinuxHidePending = false) }
+                }
 
-                -11 -> mutableEvents.emit(
-                    SettingsUiEvent.Message(R.string.settings_selinux_hide_reboot_required),
-                )
+                -11 -> {
+                    // 内核这次没能挂上 hook，但值已经写进 ksud 配置，重启后由开机流程应用。
+                    // 如实标成「待重启」，不要把开关画成已生效。
+                    if (checked) SelinuxHidePendingStore.markPending() else SelinuxHidePendingStore.clear()
+                    mutableState.update { it.copy(isSelinuxHideEnabled = checked, selinuxHidePending = checked) }
+                    mutableEvents.emit(
+                        SettingsUiEvent.Message(R.string.settings_selinux_hide_reboot_required),
+                    )
+                }
 
                 else -> mutableEvents.emit(
                     SettingsUiEvent.Message(R.string.settings_selinux_hide_failed, status),

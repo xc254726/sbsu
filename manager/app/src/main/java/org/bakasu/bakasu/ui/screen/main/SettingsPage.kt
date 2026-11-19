@@ -359,10 +359,15 @@ fun SettingsPage(bottomPadding: Dp) {
                                     "forced" -> stringResource(id = R.string.feature_status_forced_summary)
                                     else -> stringResource(id = R.string.settings_selinux_hide_summary)
                                 }
+                                val selinuxHideDescription = if (uiState.selinuxHidePending) {
+                                    stringResource(id = R.string.settings_selinux_hide_pending)
+                                } else {
+                                    selinuxHideSummary
+                                }
                                 SettingsSwitchWidget(
                                     icon = Icons.TwoTone.Policy,
                                     title = stringResource(id = R.string.settings_selinux_hide),
-                                    description = selinuxHideSummary,
+                                    description = selinuxHideDescription,
                                     enabled = uiState.selinuxHideStatus == "supported",
                                     checked = uiState.isSelinuxHideEnabled,
                                     onCheckedChange = { checked ->

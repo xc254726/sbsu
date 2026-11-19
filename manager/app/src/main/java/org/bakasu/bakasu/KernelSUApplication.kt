@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import org.bakasu.bakasu.data.settings.SelinuxHidePendingStore
 import org.bakasu.bakasu.data.shell.KsuCliRepository
 import org.bakasu.bakasu.di.appModules
 import org.bakasu.bakasu.domain.usecase.InitializeApplicationUseCase
@@ -14,6 +15,7 @@ import org.koin.core.context.startKoin
 class KernelSUApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        SelinuxHidePendingStore.init(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val processName = getProcessName()
             if (processName.endsWith("MagicaService")) {

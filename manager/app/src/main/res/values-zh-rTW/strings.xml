@@ -89,6 +89,7 @@
     <string name="settings_selinux_hide">隱藏 SELinux 修改</string>
     <string name="settings_selinux_hide_summary">限制應用檢測 SELinux 修改</string>
     <string name="settings_selinux_hide_reboot_required">重新啟動後生效</string>
+    <string name="settings_selinux_hide_pending">已排隊：核心只能在開機時掛載，重新啟動後才會真正生效</string>
     <string name="settings_selinux_hide_failed">錯誤: %d</string>
     <string name="reboot_to_apply">重新啟動後生效</string>
     <string name="module_magisk_conflict">與 Magisk 發生衝突，無法使用模組功能！</string>

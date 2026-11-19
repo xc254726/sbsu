@@ -93,6 +93,7 @@
     <string name="settings_selinux_hide">隐藏 SELinux 修改</string>
     <string name="settings_selinux_hide_summary">阻止应用检测 SELinux 修改</string>
     <string name="settings_selinux_hide_reboot_required">重启生效</string>
+    <string name="settings_selinux_hide_pending">已排队：内核只能在开机时挂载，重启后才会真正生效</string>
     <string name="settings_selinux_hide_failed">错误： %d</string>
     <string name="reboot_to_apply">重启生效</string>
     <string name="module_magisk_conflict">因与 Magisk 有冲突，所有模块不可用！</string>

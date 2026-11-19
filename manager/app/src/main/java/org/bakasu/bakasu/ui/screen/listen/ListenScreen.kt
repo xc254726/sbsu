@@ -1,6 +1,7 @@
 package org.bakasu.bakasu.ui.screen.listen
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.util.Base64
 import android.util.Log
 import androidx.compose.foundation.clickable
@@ -54,7 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -62,9 +62,7 @@ import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.R
 import org.bakasu.bakasu.data.file.RootFileEntry
 import org.bakasu.bakasu.data.file.RootFileRepository
-import org.bakasu.bakasu.data.packageinfo.InstalledPackageRepository
 import org.bakasu.bakasu.data.shell.KsuCliRepository
-import org.bakasu.bakasu.domain.model.InstalledPackageInfo
 import org.bakasu.bakasu.ui.component.ConfirmResult
 import org.bakasu.bakasu.ui.component.PackageIcon
 import org.bakasu.bakasu.ui.component.SwipeableSnackbarHost
@@ -98,33 +96,35 @@ private const val BOOT_SCRIPT = "/data/adb/service.d/sb-autotype.sh"
 private const val LEGACY_RULES = "/data/adb/modules/sb-autotype/rules.conf"
 
 /** 改动 assets 里的脚本时把这个数字加一，下次进页面会自动覆盖更新 */
-private const val BUNDLED_VERSION = "2"
+private const val BUNDLED_VERSION = "3"
 
 private const val STATUS_SCRIPT = """
 [ -d /data/adb/sb_autotype ] && echo DIR=1 || echo DIR=0
 [ -f /data/adb/service.d/sb-autotype.sh ] && echo BOOT=1 || echo BOOT=0
 [ -f /data/adb/sb-autotype.paused ] && echo PAUSED=1 || echo PAUSED=0
-echo PID=`pgrep -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null | head -n1`
+echo PID=`pgrep -f 'sb_autotype/[d]aemon\.sh' 2>/dev/null | head -n1`
+echo ALL=`pgrep -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null | tr '\\n' ','`
 """
 
 private const val START_SCRIPT = """
 rm -f /data/adb/sb-autotype.paused
 rm -f /data/adb/sb_autotype/disable
-pkill -f 'sb-autotype/[d]aemon\.sh' 2>/dev/null
+pgrep -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null | xargs kill -9 2>/dev/null
+sleep 1
 rm -rf /data/adb/sb-autotype.lock
 [ -s /data/adb/sb_autotype/start.sh ] && sh /data/adb/sb_autotype/start.sh >/dev/null 2>&1
-echo PID=`pgrep -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null | head -n1`
+echo PID=`pgrep -f 'sb_autotype/[d]aemon\.sh' 2>/dev/null | head -n1`
 """
 
 private const val PAUSE_SCRIPT = """
 touch /data/adb/sb-autotype.paused
-pkill -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null
+pgrep -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null | xargs kill -9 2>/dev/null
 rm -rf /data/adb/sb-autotype.lock
 echo PAUSED
 """
 
 private const val REMOVE_SCRIPT = """
-pkill -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null
+pgrep -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null | xargs kill -9 2>/dev/null
 rm -f /data/adb/service.d/sb-autotype.sh
 rm -f /data/adb/sb-autotype.paused
 rm -rf /data/adb/sb_autotype
@@ -137,6 +137,22 @@ echo REMOVED
 private const val READ_VERSION_SCRIPT = "cat /data/adb/sb_autotype/version 2>/dev/null"
 
 private enum class RuleDialogMode { Edit, Apps, Files }
+
+private data class PmApp(val pkg: String, val label: String, val system: Boolean)
+
+private fun loadPmApps(context: Context): List<PmApp> =
+    context.packageManager.getInstalledPackages(0)
+        .mapNotNull { info ->
+            val ai = info.applicationInfo ?: return@mapNotNull null
+            PmApp(
+                pkg = info.packageName,
+                label = runCatching { ai.loadLabel(context.packageManager).toString() }
+                    .getOrDefault(info.packageName),
+                system = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+            )
+        }
+        .filter { it.pkg != "android" }
+        .sortedBy { it.label.lowercase() }
 
 private data class ListenRule(
     val pkg: String,
@@ -178,12 +194,16 @@ private fun installScripts(context: Context, ksuCli: KsuCliRepository): String {
         append("echo '").append(assetBase64(context, "boot.sh")).append("' | base64 -d > $BOOT_SCRIPT\n")
         append("chmod 755 $BOOT_SCRIPT\n")
         append("echo '$BUNDLED_VERSION' > $RULE_DIR/version\n")
-        append("[ -f $RULES_FILE ] || { [ -f $LEGACY_RULES ] && cp -f $LEGACY_RULES $RULES_FILE; }\n")
+        append("if [ -f $LEGACY_RULES ]; then\n")
+        append("  if [ ! -s $RULES_FILE ] || ! grep -qv -e '^[[:space:]]*#' -e '^[[:space:]]*\$' $RULES_FILE; then\n")
+        append("    cp -f $LEGACY_RULES $RULES_FILE\n")
+        append("  fi\n")
+        append("fi\n")
         append("[ -f $RULES_FILE ] || : > $RULES_FILE\n")
         append("chmod 644 $RULES_FILE\n")
         // 旧模块如果还在，标记为停用，免得开机时它再拉起一份守护进程
         append("[ -d /data/adb/modules/sb-autotype ] && touch /data/adb/modules/sb-autotype/disable\n")
-        append("pkill -f 'sb-autotype/[d]aemon\\.sh' 2>/dev/null\n")
+        append("pgrep -f 'sb[-_]autotype/[d]aemon\\.sh' 2>/dev/null | xargs kill -9 2>/dev/null\n")
         append("rm -rf /data/adb/sb-autotype.lock\n")
         append("echo base64=${'$'}(command -v base64 || echo MISSING)\n")
         listOf("$RULE_DIR/daemon.sh", "$RULE_DIR/start.sh", "$BOOT_SCRIPT").forEach {
@@ -235,7 +255,6 @@ fun ListenScreen() {
     val themeConfig: ThemeConfig = koinInject()
     val cardConfig: CardConfig = koinInject()
     val ksuCli: KsuCliRepository = koinInject()
-    val installedPackages: InstalledPackageRepository = koinInject()
     val rootFiles = remember(ksuCli) { RootFileRepository(ksuCli) }
     val context = LocalContext.current
     val navigator = LocalNavigator.current
@@ -243,7 +262,6 @@ fun ListenScreen() {
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     val confirmDialog = rememberConfirmDialog()
-    val packages by installedPackages.packages.collectAsStateWithLifecycle()
 
     var status by remember { mutableStateOf(ListenStatus()) }
     var rules by remember { mutableStateOf<List<ListenRule>>(emptyList()) }
@@ -252,6 +270,12 @@ fun ListenScreen() {
     var draft by remember { mutableStateOf<ListenRule?>(null) }
     var draftIndex by remember { mutableStateOf(-1) }
     var dialogMode by remember { mutableStateOf(RuleDialogMode.Edit) }
+    var appsReload by remember { mutableStateOf(0) }
+    var pmApps by remember { mutableStateOf<List<PmApp>>(emptyList()) }
+    LaunchedEffect(appsReload) {
+        pmApps = withContext(Dispatchers.IO) { loadPmApps(context) }
+        Log.i("SBListen", "pm apps: " + pmApps.size)
+    }
 
     val msgStart = stringResource(R.string.listen_started)
     val msgPaused = stringResource(R.string.listen_paused_toast)
@@ -279,7 +303,6 @@ fun ListenScreen() {
     }
 
     LaunchedEffect(Unit) {
-        installedPackages.refresh()
         val version = withContext(Dispatchers.IO) { runRootShell(ksuCli, READ_VERSION_SCRIPT) }.trim()
         val bootOk = withContext(Dispatchers.IO) { runRootShell(ksuCli, STATUS_SCRIPT) }.contains("BOOT=1")
         if (version != BUNDLED_VERSION || !bootOk) {
@@ -328,7 +351,7 @@ fun ListenScreen() {
     }
 
     val labelOf: (String) -> String = { pkg ->
-        packages.firstOrNull { it.packageName == pkg }?.appLabel?.takeIf { it.isNotBlank() } ?: pkg
+        pmApps.firstOrNull { it.pkg == pkg }?.label?.takeIf { it.isNotBlank() } ?: pkg
     }
 
     Scaffold(
@@ -534,9 +557,10 @@ fun ListenScreen() {
             text = {
                 when (dialogMode) {
                     RuleDialogMode.Apps -> AppPickerContent(
-                        packages = packages,
-                        onPick = { info ->
-                            draft = current.copy(pkg = info.packageName)
+                        apps = pmApps,
+                        onReload = { appsReload += 1 },
+                        onPick = { app ->
+                            draft = current.copy(pkg = app.pkg)
                             dialogMode = RuleDialogMode.Edit
                         },
                     )
@@ -555,7 +579,7 @@ fun ListenScreen() {
                         onChange = { draft = it },
                         onPickApp = {
                             dialogMode = RuleDialogMode.Apps
-                            scope.launch { installedPackages.refresh() }
+                            if (pmApps.isEmpty()) appsReload += 1
                         },
                         onPickScript = { dialogMode = RuleDialogMode.Files },
                     )
@@ -681,59 +705,83 @@ private fun RuleEditContent(
 
 @Composable
 private fun AppPickerContent(
-    packages: List<InstalledPackageInfo>,
-    onPick: (InstalledPackageInfo) -> Unit,
+    apps: List<PmApp>,
+    onReload: () -> Unit,
+    onPick: (PmApp) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    val filtered = remember(packages, query) {
+    val filtered = remember(apps, query) {
         val q = query.trim().lowercase()
-        packages
-            .filter { it.packageName != "android" }
-            .filter {
-                q.isEmpty() || it.appLabel.lowercase().contains(q) || it.packageName.lowercase().contains(q)
-            }
-            .sortedWith(compareBy({ it.appLabel.firstOrNull()?.code ?: 0 }, { it.appLabel }))
+        if (q.isEmpty()) {
+            apps
+        } else {
+            apps.filter { it.label.lowercase().contains(q) || it.pkg.lowercase().contains(q) }
+        }
     }
 
     Column(Modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text(stringResource(R.string.listen_rule_search)) },
+            label = {
+                Text(
+                    stringResource(R.string.listen_rule_search) + " (" + apps.size + ")",
+                )
+            },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.size(8.dp))
+        Spacer(Modifier.size(6.dp))
+
         if (filtered.isEmpty()) {
             Text(
-                text = stringResource(R.string.listen_apps_empty),
+                text = if (apps.isEmpty()) {
+                    stringResource(R.string.listen_apps_empty)
+                } else {
+                    stringResource(R.string.listen_apps_no_match)
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 16.dp),
+                modifier = Modifier.padding(vertical = 12.dp),
             )
+            TextButton(onClick = onReload) {
+                Text(stringResource(R.string.listen_apps_reload))
+            }
             return@Column
         }
+
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 380.dp),
+                .heightIn(max = 400.dp),
         ) {
-            items(filtered, key = { it.packageName }) { info ->
+            items(filtered, key = { it.pkg }) { app ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onPick(info) }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                        .clickable { onPick(app) }
+                        .padding(vertical = 10.dp, horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PackageIcon(info.packageName, null, Modifier.size(34.dp))
+                    PackageIcon(app.pkg, null, Modifier.size(36.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text(
-                        text = info.appLabel.ifBlank { info.packageName },
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = app.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (app.system) {
+                            Text(
+                                text = app.pkg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }

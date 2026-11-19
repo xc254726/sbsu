@@ -553,7 +553,7 @@
     <string name="listen_rules_summary">已設定 %1$d 條規則，點這裡選擇應用與腳本</string>
     <string name="listen_about_group">說明</string>
     <string name="listen_boot_title">開機自動執行</string>
-    <string name="listen_boot_summary">由模組在開機時啟動，滑掉或解除安裝管理器都不會停止；只有關閉上方開關才會停止。</string>
+    <string name="listen_boot_summary">由開機腳本啟動，滑掉或解除安裝管理器都不會停止；只有關閉上方開關才會停止。</string>
     <string name="listen_started">已開始監聽</string>
     <string name="listen_paused_toast">已暫停監聽</string>
 
@@ -584,4 +584,6 @@
     <string name="listen_rule_back">返回</string>
     <string name="listen_apps_empty">應用列表是空的，離開此頁面再進入一次就會重新載入。</string>
     <string name="listen_files_empty">這裡沒有子目錄或 .sh 腳本</string>
+    <string name="listen_apps_no_match">沒有符合的應用</string>
+    <string name="listen_apps_reload">重新載入</string>
 </resources>

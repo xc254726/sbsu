@@ -2,6 +2,7 @@ package org.bakasu.bakasu.ui.screen.listen
 
 import android.content.Context
 import android.util.Base64
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -97,7 +98,7 @@ private const val BOOT_SCRIPT = "/data/adb/service.d/sb-autotype.sh"
 private const val LEGACY_RULES = "/data/adb/modules/sb-autotype/rules.conf"
 
 /** 改动 assets 里的脚本时把这个数字加一，下次进页面会自动覆盖更新 */
-private const val BUNDLED_VERSION = "1"
+private const val BUNDLED_VERSION = "2"
 
 private const val STATUS_SCRIPT = """
 [ -d /data/adb/sb_autotype ] && echo DIR=1 || echo DIR=0
@@ -109,8 +110,10 @@ echo PID=`pgrep -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null | head -n1`
 private const val START_SCRIPT = """
 rm -f /data/adb/sb-autotype.paused
 rm -f /data/adb/sb_autotype/disable
-[ -f /data/adb/sb_autotype/start.sh ] && sh /data/adb/sb_autotype/start.sh >/dev/null 2>&1
-echo STARTED
+pkill -f 'sb-autotype/[d]aemon\.sh' 2>/dev/null
+rm -rf /data/adb/sb-autotype.lock
+[ -s /data/adb/sb_autotype/start.sh ] && sh /data/adb/sb_autotype/start.sh >/dev/null 2>&1
+echo PID=`pgrep -f 'sb[-_]autotype/[d]aemon\.sh' 2>/dev/null | head -n1`
 """
 
 private const val PAUSE_SCRIPT = """
@@ -178,9 +181,19 @@ private fun installScripts(context: Context, ksuCli: KsuCliRepository): String {
         append("[ -f $RULES_FILE ] || { [ -f $LEGACY_RULES ] && cp -f $LEGACY_RULES $RULES_FILE; }\n")
         append("[ -f $RULES_FILE ] || : > $RULES_FILE\n")
         append("chmod 644 $RULES_FILE\n")
+        // 旧模块如果还在，标记为停用，免得开机时它再拉起一份守护进程
+        append("[ -d /data/adb/modules/sb-autotype ] && touch /data/adb/modules/sb-autotype/disable\n")
+        append("pkill -f 'sb-autotype/[d]aemon\\.sh' 2>/dev/null\n")
+        append("rm -rf /data/adb/sb-autotype.lock\n")
+        append("echo base64=${'$'}(command -v base64 || echo MISSING)\n")
+        listOf("$RULE_DIR/daemon.sh", "$RULE_DIR/start.sh", "$BOOT_SCRIPT").forEach {
+            append("echo size[$it]=${'$'}(wc -c < $it 2>/dev/null)\n")
+        }
         append("echo INSTALLED\n")
     }
-    return runRootShell(ksuCli, script)
+    val result = runRootShell(ksuCli, script)
+    Log.i("SBListen", "install: " + result.replace("\n", " | "))
+    return result
 }
 
 private fun parseRules(raw: String): List<ListenRule> = raw.lineSequence()
@@ -261,6 +274,7 @@ fun ListenScreen() {
                 ?.isNotEmpty() == true,
         )
         rules = parseRules(withContext(Dispatchers.IO) { runRootShell(ksuCli, "cat $RULES_FILE 2>/dev/null") })
+        Log.i("SBListen", "status: " + text.replace("\n", " | ") + " rules=" + rules.size)
         loaded = true
     }
 
@@ -368,9 +382,10 @@ fun ListenScreen() {
                             onCheckedChange = { on ->
                                 scope.launch {
                                     busy = true
-                                    withContext(Dispatchers.IO) {
+                                    val out = withContext(Dispatchers.IO) {
                                         runRootShell(ksuCli, if (on) START_SCRIPT else PAUSE_SCRIPT)
                                     }
+                                    Log.i("SBListen", "toggle=$on -> " + out.replace("\n", " | "))
                                     delay(if (on) 600 else 400)
                                     refresh()
                                     busy = false

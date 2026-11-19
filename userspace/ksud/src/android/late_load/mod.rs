@@ -49,6 +49,19 @@ pub fn run(package_name: &String, kmi: Option<String>, allow_shell: bool) -> Res
     info!("late-load command triggered!");
     dump_process_info("late-load start");
 
+    // 0. Optional hot swap. When kernelsu.ko lives in the boot ramdisk there is
+    // no way to replace it without reflashing, so allow a marker file to ask
+    // for the currently loaded module to be dropped and the bundled one loaded
+    // in its place. Reboot remains the fallback if anything goes wrong.
+    let swap_marker = std::path::Path::new("/data/local/tmp/.ksu_swap");
+    let force_reload = swap_marker.exists();
+    if force_reload {
+        info!("late-load: swap marker found, unloading current module");
+        let _ = std::fs::remove_file(swap_marker);
+        crate::android::unload::unload_kernel_only()
+            .context("Failed to unload the running kernelsu module")?;
+    }
+
     // 1. Check if KernelSU is already loaded
     if ksuinit::has_kernelsu() {
         info!("KernelSU already loaded, skip loading ko");
@@ -76,6 +89,13 @@ pub fn run(package_name: &String, kmi: Option<String>, allow_shell: bool) -> Res
         ksuinit::load_module(&ko_data, params).context("Failed to load kernelsu.ko")?;
         info!("kernelsu.ko loaded successfully!");
         dump_process_info("after load_module");
+    }
+
+    if force_reload {
+        // Services were stopped by unload_kernel_only, bring them back now that
+        // a module is loaded again.
+        info!("late-load: restarting Android services");
+        let _ = Command::new("start").status();
     }
 
     // We need to reset stdin/stdout/stderr; otherwise, sending file descriptors via cmd transactions

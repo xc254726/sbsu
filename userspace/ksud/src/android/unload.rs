@@ -105,7 +105,12 @@ fn close_ksu_fds() {
     }
 }
 
-pub fn unload() -> Result<()> {
+/// Unload the running kernelsu module without touching init services.
+///
+/// Used by the hot-swap path: the caller unloads, loads a freshly bundled
+/// kernelsu.ko and only then runs `start`, so services never come back up
+/// without a module.
+pub fn unload_kernel_only() -> Result<()> {
     info!("unload: starting KernelSU unload sequence");
 
     // 0. Switch cgroups so we don't get killed along with our parent shell
@@ -145,6 +150,12 @@ pub fn unload() -> Result<()> {
     if let Err(e) = rustix::system::delete_module(c"kernelsu", 0) {
         warn!("unload: delete_module kernelsu failed: {e}");
     }
+
+    Ok(())
+}
+
+pub fn unload() -> Result<()> {
+    unload_kernel_only()?;
 
     // 5. start (Android init start command - restarts all services)
     info!("unload: restarting Android services...");

@@ -98,7 +98,7 @@ private const val BOOT_SCRIPT = "/data/adb/service.d/sb-autotype.sh"
 private const val LEGACY_RULES = "/data/adb/modules/sb-autotype/rules.conf"
 
 /** 改动 assets 里的脚本时把这个数字加一，下次进页面会自动覆盖更新 */
-private const val BUNDLED_VERSION = "3"
+private const val BUNDLED_VERSION = "4"
 
 private const val STATUS_SCRIPT = """
 [ -d /data/adb/sb_autotype ] && echo DIR=1 || echo DIR=0
@@ -132,6 +132,7 @@ rm -f /data/adb/sb-autotype.paused
 rm -rf /data/adb/sb_autotype
 rm -rf /data/adb/modules/sb-autotype
 rm -f /data/adb/sb-autotype.log /data/adb/sb-autotype.pid
+rm -f /sdcard/sb-autotype.log /sdcard/sb-autotype-diag.txt
 rm -rf /data/adb/sb-autotype.state /data/adb/sb-autotype.lock
 echo REMOVED
 """

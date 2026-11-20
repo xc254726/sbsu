@@ -18,15 +18,17 @@ RULES="$MODDIR/rules.conf"
 STATE=/data/adb/sb-autotype.state
 LOCK=/data/adb/sb-autotype.lock
 
-# 日志写到 /sdcard，任何文件管理器、adb 都能直接看；
-# 万一 /sdcard 还没挂好（极早期启动），退回 /data/adb。
-LOG=/sdcard/sb-autotype.log
+# 日志只落在 /data/adb/sb_autotype，不写内部存储（/sdcard）。
+# 极早期 /data 还没挂好时退回 /data/local/tmp，避免因为写不了日志就中断。
+LOGDIR="$MODDIR"
+mkdir -p "$LOGDIR" 2>/dev/null
+LOG="$LOGDIR/sb-autotype.log"
 if ! (: >> "$LOG") 2>/dev/null; then
-  LOG=/data/adb/sb-autotype.log
+  LOG=/data/local/tmp/sb-autotype.log
   : >> "$LOG" 2>/dev/null
 fi
-DIAG=/sdcard/sb-autotype-diag.txt
-: >> "$DIAG" 2>/dev/null || DIAG=/data/adb/sb-autotype-diag.txt
+DIAG="$LOGDIR/sb-autotype-diag.txt"
+: >> "$DIAG" 2>/dev/null || DIAG=/data/local/tmp/sb-autotype-diag.txt
 
 log() { echo "$(date '+%m-%d %H:%M:%S') $*" >> "$LOG"; }
 

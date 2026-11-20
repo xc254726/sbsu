@@ -9,8 +9,9 @@ export PATH=/system/bin:/system/xbin:/vendor/bin:/data/adb/ksu/bin:$PATH
 DIR=${0%/*}
 PAT='sb[-_]autotype/[d]aemon\.sh'
 
-LOG=/sdcard/sb-autotype.log
-if ! (: >> "$LOG") 2>/dev/null; then LOG=/data/adb/sb-autotype.log; fi
+# 日志统一写在 /data/adb/sb_autotype，不再落到内部存储
+LOG="$DIR/sb-autotype.log"
+if ! (: >> "$LOG") 2>/dev/null; then LOG=/data/local/tmp/sb-autotype.log; fi
 
 log() { echo "$(date '+%m-%d %H:%M:%S') [start] $*" >> "$LOG"; }
 

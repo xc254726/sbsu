@@ -8,8 +8,9 @@ export PATH=/system/bin:/system/xbin:/vendor/bin:/data/adb/ksu/bin:$PATH
 [ -f /data/adb/sb-autotype.paused ] && exit 0
 [ -d /data/adb/sb_autotype ] || exit 0
 
-LOG=/sdcard/sb-autotype.log
-if ! (: >> "$LOG") 2>/dev/null; then LOG=/data/adb/sb-autotype.log; fi
+# 日志统一写在 /data/adb/sb_autotype，不再落到内部存储
+LOG=/data/adb/sb_autotype/sb-autotype.log
+if ! (: >> "$LOG") 2>/dev/null; then LOG=/data/local/tmp/sb-autotype.log; fi
 echo "$(date '+%m-%d %H:%M:%S') [boot] service.d start" >> "$LOG"
 
 i=0

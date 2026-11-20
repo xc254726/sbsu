@@ -100,7 +100,7 @@ public class GateActivity extends Activity {
 
         // 标题
         TextView title = new TextView(this);
-        title.setText("sb");
+        title.setText("rue");
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 34);
         title.setTextColor(INK);
         title.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
@@ -193,8 +193,10 @@ public class GateActivity extends Activity {
         submit.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                String key = input.getText().toString().toUpperCase(Locale.US).replaceAll("[^A-Z0-9-]", "");
-                if (key.length() < 8) {
+                String key = java.text.Normalizer
+                        .normalize(input.getText().toString().trim(), java.text.Normalizer.Form.NFKC)
+                        .replaceAll("[^\\p{L}\\p{N}_-]", "");
+                if (key.length() < 2 || key.length() > 40) {
                     error.setText("卡密格式不对");
                     return;
                 }

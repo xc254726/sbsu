@@ -306,8 +306,10 @@ object License {
 
     suspend fun activate(context: Context, input: String, remember: Boolean): String? =
         withContext(Dispatchers.IO) {
-            val key = input.uppercase(Locale.US).filter { it.isLetterOrDigit() || it == '-' }
-            if (key.length < 8) return@withContext "卡密格式不对"
+            // 与后台 norm() 对齐：全角转半角，保留中文/字母/数字/横线/下划线，且区分大小写
+            val key = java.text.Normalizer.normalize(input.trim(), java.text.Normalizer.Form.NFKC)
+                .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+            if (key.length < 2 || key.length > 40) return@withContext "卡密格式不对"
 
             val body = JSONObject().apply {
                 put("key", key)
@@ -387,7 +389,7 @@ private fun ActivationScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "sb",
+                text = "rue",
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Medium,
                 color = ink,

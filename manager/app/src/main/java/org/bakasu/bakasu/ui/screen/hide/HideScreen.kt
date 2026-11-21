@@ -154,8 +154,8 @@ fun HideScreen() {
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "开启后管理器会从桌面、应用管理、电池统计里消失，同时后台守护会监听内部存储里的指定文件夹；" +
-                        "只要建出那个文件夹，就会自动把 rue 装回来并打开。",
+                    "开启后管理器会从桌面、应用管理、电池统计里消失，同时后台守护会监听你指定的路径（默认 /sdcard 下的同名文件夹）；" +
+                        "路径一出现，就会自动解除隐藏、静默装回并打开 rue。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -173,9 +173,19 @@ fun HideScreen() {
 
         OutlinedTextField(
             value = folder,
-            onValueChange = { folder = it.filter { c -> !c.isWhitespace() && c != '/' }.take(32) },
-            label = { Text("监听文件夹名") },
-            supportingText = { Text("例：填 rue，就会监听 /sdcard/rue") },
+            onValueChange = { raw ->
+                folder = raw
+                    .filter { c -> !c.isWhitespace() && c != '\'' && c != '"' && c != '\\' }
+                    .replace(Regex("/{2,}"), "/")
+                    .take(96)
+            },
+            label = { Text("监听路径") },
+            supportingText = {
+                Text(
+                    if (folder.startsWith("/")) "完整路径：$folder"
+                    else "填名字监听 /sdcard/$folder；也可填 /sdcard/Download/rue 这样的完整路径",
+                )
+            },
             singleLine = true,
             enabled = !busy,
             shape = RoundedCornerShape(14.dp),
@@ -234,8 +244,8 @@ fun HideScreen() {
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "恢复方法：在内部存储根目录新建文件夹「$folder」，几秒内会自动解除隐藏、静默装回并打开 rue，" +
-                "随后隐藏自动关闭（开关回到未启用状态）。",
+            "恢复方法：创建「${if (folder.startsWith("/")) folder else "/sdcard/$folder"}」，几秒内会自动解除隐藏、" +
+                "静默装回并打开 rue，随后隐藏自动关闭（开关回到未启用状态）。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

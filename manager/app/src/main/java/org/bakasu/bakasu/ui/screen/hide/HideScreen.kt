@@ -19,13 +19,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.twotone.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -125,6 +125,7 @@ fun HideScreen() {
     var busy by remember { mutableStateOf(true) }
     var message by remember { mutableStateOf("") }
     var browsing by remember { mutableStateOf(false) }
+    var confirming by remember { mutableStateOf(false) }
 
     fun refresh() {
         scope.launch {
@@ -210,6 +211,30 @@ fun HideScreen() {
             busy = false
             refresh()
         }
+    }
+
+    if (confirming) {
+        val target = triggerPath(dir, name)
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("确认隐藏 rue") },
+            text = {
+                Text(
+                    "隐藏后 rue 会立刻从桌面、应用管理、电池统计里消失，" +
+                        "只能靠创建下面这个路径恢复：\n\n$target\n\n" +
+                        "确认要开始吗？",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = false
+                    enable()
+                }) { Text("开始隐藏") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("取消") }
+            },
+        )
     }
 
     if (browsing) {
@@ -332,36 +357,39 @@ fun HideScreen() {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("开始隐藏", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        when {
-                            busy -> "处理中…"
-                            enabled && !installed -> "已移除 · 守护 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
-                            enabled && hidden -> "已隐藏（可见性受限）· 守护 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
-                            enabled -> "监听已配置，管理器当前可见"
-                            else -> "未启用"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (enabled) "隐藏已开启" else "开始隐藏",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            when {
+                                busy -> "处理中…"
+                                enabled && !installed -> "已移除 · 守护 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
+                                enabled && hidden -> "已隐藏（可见性受限）· 守护 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
+                                enabled -> "监听已配置，管理器当前可见"
+                                else -> "填好上面两项，点下面保存"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (busy) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
-                if (busy) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                } else {
-                    Switch(
-                        checked = enabled,
-                        onCheckedChange = { on -> if (on) enable() else disable() },
-                    )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = { if (enabled) disable() else confirming = true },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (enabled) "立即恢复显示" else "保存并开始隐藏")
                 }
             }
         }

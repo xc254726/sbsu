@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +58,22 @@ private fun runRootShell(ksuCli: KsuCliRepository, script: String): String {
         ksuCli.getRootShell().newJob().add(script).to(out, err).exec()
     }
     return (out + err).joinToString("\n")
+}
+
+/** 只保留路径字符：去掉换行/制表、单引号、反斜杠，合并重复斜杠，去掉结尾斜杠。 */
+private fun normalizePath(raw: String): String {
+    var p = raw.replace(Regex("[\\r\\n\\t]"), "")
+        .filter { it != '\'' && it != '\\' }
+    p = p.replace(Regex("/{2,}"), "/")
+    if (p.length > 1) p = p.trimEnd('/')
+    return p.take(128)
+}
+
+/** 绝对路径原样使用；只填名字时挂到内部存储根目录。 */
+private fun resolvePath(raw: String): String {
+    val p = normalizePath(raw)
+    if (p.isEmpty()) return p
+    return if (p.startsWith("/")) p else "/sdcard/$p"
 }
 
 private fun assetBase64(context: Context, name: String): String =
@@ -105,6 +122,25 @@ fun HideScreen() {
     }
 
     LaunchedEffect(Unit) { refresh() }
+
+    fun probe() {
+        val target = resolvePath(folder)
+        if (target.isEmpty()) {
+            message = "先填一个路径"
+            return
+        }
+        scope.launch {
+            val out = withContext(Dispatchers.IO) {
+                runRootShell(ksuCli, "ls -ld '$target' 2>&1")
+            }.trim()
+            message = when {
+                out.isEmpty() -> "路径不存在：$target（创建后会自动触发恢复）"
+                out.contains("No such file") || out.contains("not found") ->
+                    "路径不存在：$target（创建后会自动触发恢复）"
+                else -> "可访问：$out".take(240)
+            }
+        }
+    }
 
     fun enable() {
         val name = folder.trim()
@@ -173,17 +209,14 @@ fun HideScreen() {
 
         OutlinedTextField(
             value = folder,
-            onValueChange = { raw ->
-                folder = raw
-                    .filter { c -> !c.isWhitespace() && c != '\'' && c != '"' && c != '\\' }
-                    .replace(Regex("/{2,}"), "/")
-                    .take(96)
-            },
+            onValueChange = { raw -> folder = normalizePath(raw) },
             label = { Text("监听路径") },
+            placeholder = { Text("/sdcard/rue 或 /data/local/tmp/rue") },
             supportingText = {
                 Text(
-                    if (folder.startsWith("/")) "完整路径：$folder"
-                    else "填名字监听 /sdcard/$folder；也可填 /sdcard/Download/rue 这样的完整路径",
+                    "实际监听：${resolvePath(folder)}" +
+                        if (folder.startsWith("/")) "（绝对路径原样使用）"
+                        else "（只填名字时挂在 /sdcard 下）",
                 )
             },
             singleLine = true,
@@ -192,7 +225,17 @@ fun HideScreen() {
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { probe() }, enabled = !busy) {
+                Text("检测路径")
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
 
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -244,7 +287,7 @@ fun HideScreen() {
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "恢复方法：创建「${if (folder.startsWith("/")) folder else "/sdcard/$folder"}」，几秒内会自动解除隐藏、" +
+            "恢复方法：创建「${resolvePath(folder)}」，几秒内会自动解除隐藏、" +
                 "静默装回并打开 rue，随后隐藏自动关闭（开关回到未启用状态）。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

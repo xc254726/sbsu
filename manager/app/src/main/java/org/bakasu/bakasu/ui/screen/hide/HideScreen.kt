@@ -263,14 +263,15 @@ fun HideScreen() {
         OutlinedTextField(
             value = dir,
             onValueChange = { dir = normalizeDir(it) },
-            label = { Text("监听目录") },
-            placeholder = { Text("/sdcard 或 /storage/XXXX-XXXX/backup") },
+            label = { Text("监听目录（可直接输入）") },
+            placeholder = { Text("/storage/emulated/0/MT2") },
+            supportingText = { Text("直接输入完整路径；也可以点右侧「选择」逐层点") },
             singleLine = true,
             enabled = !busy,
             shape = RoundedCornerShape(14.dp),
             trailingIcon = {
                 TextButton(onClick = { browsing = true }, enabled = !busy) {
-                    Text("浏览")
+                    Text("选择")
                 }
             },
             modifier = Modifier.fillMaxWidth(),

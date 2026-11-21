@@ -91,7 +91,6 @@ import org.bakasu.bakasu.ui.screen.about.AboutScreen
 import org.bakasu.bakasu.ui.screen.about.OpenSourceLicenseScreen
 import org.bakasu.bakasu.ui.screen.kernelFlash.KernelFlashScreen
 import org.bakasu.bakasu.ui.screen.listen.ListenScreen
-import org.bakasu.bakasu.ui.screen.hide.HideScreen
 import org.bakasu.bakasu.ui.screen.main.MainScreen
 import org.bakasu.bakasu.ui.screen.moduleRepo.AddRepositoryScreen
 import org.bakasu.bakasu.ui.screen.moduleRepo.ModuleRepoScreen
@@ -589,17 +588,6 @@ fun NavContainer(
                     useBlur = useBlur,
                 ) {
                     ListenScreen()
-                }
-            }
-            entry<Route.Hide>(swipeDismiss = swipeBackDirection) {
-                ManagerNavEntry(
-                    interceptPredictiveBack = interceptPredictiveBack,
-                    onBack = onBack,
-                    themeConfig = themeConfig,
-                    backgroundRenderState = backgroundRenderState,
-                    useBlur = useBlur,
-                ) {
-                    HideScreen()
                 }
             }
             entry<Route.DynamicManager>(swipeDismiss = swipeBackDirection) {

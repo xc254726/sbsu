@@ -48,7 +48,6 @@ import androidx.compose.material.icons.twotone.Security
 import androidx.compose.material.icons.twotone.Settings
 import androidx.compose.material.icons.twotone.Share
 import androidx.compose.material.icons.twotone.Tune
-import androidx.compose.material.icons.twotone.VisibilityOff
 import androidx.compose.material.icons.twotone.Update
 import androidx.compose.material.icons.twotone.VerifiedUser
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -487,16 +486,6 @@ fun SettingsPage(bottomPadding: Dp) {
                                 description = stringResource(R.string.listen_settings_summary),
                                 onClick = {
                                     navigator.push(Route.Listen)
-                                },
-                            )
-                        }
-                        item {
-                            SettingsJumpPageWidget(
-                                icon = Icons.TwoTone.VisibilityOff,
-                                title = "隐藏",
-                                description = "隐藏管理器并从文件夹自动恢复",
-                                onClick = {
-                                    navigator.push(Route.Hide)
                                 },
                             )
                         }

@@ -11,11 +11,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.twotone.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -60,8 +64,8 @@ private fun runRootShell(ksuCli: KsuCliRepository, script: String): String {
     return (out + err).joinToString("\n")
 }
 
-/** 只保留路径字符：去掉换行/制表、单引号、反斜杠，合并重复斜杠，去掉结尾斜杠。 */
-private fun normalizePath(raw: String): String {
+/** 目录路径归一化：去换行/制表、单引号、反斜杠，合并重复斜杠，去掉结尾斜杠。 */
+private fun normalizeDir(raw: String): String {
     var p = raw.replace(Regex("[\\r\\n\\t]"), "")
         .filter { it != '\'' && it != '\\' }
     p = p.replace(Regex("/{2,}"), "/")
@@ -69,12 +73,36 @@ private fun normalizePath(raw: String): String {
     return p.take(128)
 }
 
-/** 绝对路径原样使用；只填名字时挂到内部存储根目录。 */
-private fun resolvePath(raw: String): String {
-    val p = normalizePath(raw)
-    if (p.isEmpty()) return p
-    return if (p.startsWith("/")) p else "/sdcard/$p"
+/** 文件夹名：不允许斜杠和空白，避免拼出意料之外的路径。 */
+private fun normalizeName(raw: String): String =
+    raw.replace(Regex("[\\r\\n\\t]"), "")
+        .filter { it != '\'' && it != '\\' && it != '/' }
+        .take(64)
+
+/** 最终监听路径 = 目录 + 名称。 */
+private fun triggerPath(dir: String, name: String): String {
+    val d = normalizeDir(dir)
+    val n = normalizeName(name).trim()
+    if (d.isEmpty() || n.isEmpty()) return ""
+    return if (d == "/") "/$n" else "$d/$n"
 }
+
+private fun parentOf(path: String): String {
+    val t = path.trimEnd('/')
+    if (t.isEmpty()) return "/"
+    val idx = t.lastIndexOf('/')
+    return if (idx <= 0) "/" else t.substring(0, idx)
+}
+
+private fun listDirs(ksuCli: KsuCliRepository, path: String): List<String> =
+    runRootShell(ksuCli, "ls -1p '$path' 2>/dev/null")
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.endsWith("/") && it.length > 1 }
+        .map { it.dropLast(1) }
+        .filter { it.isNotEmpty() && !it.contains("/") }
+        .sorted()
+        .toList()
 
 private fun assetBase64(context: Context, name: String): String =
     Base64.encodeToString(
@@ -88,13 +116,15 @@ fun HideScreen() {
     val ksuCli: KsuCliRepository = koinInject()
     val scope = rememberCoroutineScope()
 
-    var folder by remember { mutableStateOf("rue") }
+    var dir by remember { mutableStateOf("/sdcard") }
+    var name by remember { mutableStateOf("rue") }
     var enabled by remember { mutableStateOf(false) }
     var hidden by remember { mutableStateOf(false) }
     var pid by remember { mutableStateOf("") }
     var installed by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(true) }
     var message by remember { mutableStateOf("") }
+    var browsing by remember { mutableStateOf(false) }
 
     fun refresh() {
         scope.launch {
@@ -112,8 +142,15 @@ fun HideScreen() {
                 ).trim()
                 Triple(conf, state.contains("hidden=true"), running to present)
             }
-            if (res.first.isNotBlank()) folder = res.first
-            enabled = res.first.isNotBlank()
+            val conf = res.first
+            if (conf.isNotBlank()) {
+                // 配置里存的是完整路径，拆回目录 + 名称
+                val path = if (conf.startsWith("/")) conf else "/sdcard/$conf"
+                val idx = path.lastIndexOf('/')
+                dir = if (idx <= 0) "/" else path.substring(0, idx)
+                name = path.substring(idx + 1).ifBlank { "rue" }
+            }
+            enabled = conf.isNotBlank()
             hidden = res.second
             pid = res.third.first
             installed = res.third.second != "0"
@@ -124,9 +161,9 @@ fun HideScreen() {
     LaunchedEffect(Unit) { refresh() }
 
     fun probe() {
-        val target = resolvePath(folder)
+        val target = triggerPath(dir, name)
         if (target.isEmpty()) {
-            message = "先填一个路径"
+            message = "目录和文件夹名都要填"
             return
         }
         scope.launch {
@@ -134,27 +171,31 @@ fun HideScreen() {
                 runRootShell(ksuCli, "ls -ld '$target' 2>&1")
             }.trim()
             message = when {
-                out.isEmpty() -> "路径不存在：$target（创建后会自动触发恢复）"
+                out.isEmpty() -> "还没触发：$target 不存在（建出来就会恢复）"
                 out.contains("No such file") || out.contains("not found") ->
-                    "路径不存在：$target（创建后会自动触发恢复）"
-                else -> "可访问：$out".take(240)
+                    "还没触发：$target 不存在（建出来就会恢复）"
+                else -> "已存在：$out".take(240)
             }
         }
     }
 
     fun enable() {
-        val name = folder.trim()
-        if (name.isEmpty()) {
-            message = "先填一个文件夹名字"
+        val target = triggerPath(dir, name)
+        if (target.isEmpty()) {
+            message = "目录和文件夹名都要填"
             return
         }
         scope.launch {
             busy = true
             message = ""
             val result = withContext(Dispatchers.IO) {
-                runRootShell(ksuCli, buildEnableScript(context, name))
+                runRootShell(ksuCli, buildEnableScript(context, target))
             }
-            message = if (result.contains("ENABLED")) "已开启：管理器已隐藏，等待文件夹触发" else result.take(300)
+            message = when {
+                result.contains("ENABLED_HIDE_ONLY") -> "已隐藏（备份失败，仅 pm hide）"
+                result.contains("ENABLED") -> "已开始隐藏，等待 $target 出现"
+                else -> result.take(300)
+            }
             busy = false
             refresh()
         }
@@ -169,6 +210,17 @@ fun HideScreen() {
             busy = false
             refresh()
         }
+    }
+
+    if (browsing) {
+        DirPickerDialog(
+            startPath = normalizeDir(dir).ifBlank { "/sdcard" },
+            onDismiss = { browsing = false },
+            onPick = {
+                dir = it
+                browsing = false
+            },
+        )
     }
 
     Column(
@@ -190,15 +242,16 @@ fun HideScreen() {
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "开启后管理器会从桌面、应用管理、电池统计里消失，同时后台守护会监听你指定的路径（默认 /sdcard 下的同名文件夹）；" +
-                        "路径一出现，就会自动解除隐藏、静默装回并打开 rue。",
+                    "先选一个目录，再给它下面要触发的文件夹起个名，然后打开开关。" +
+                        "管理器会从桌面、应用管理、电池统计里消失；只要「目录/名字」出现，" +
+                        "就自动解除隐藏、静默装回并打开 rue。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "注意：开启后 APK 会从系统里移除（已备份到 /data/adb/rue/rue.apk），" +
-                        "管理器立刻打不开，只能靠文件夹恢复；守护进程已迁出管理器 cgroup，不会被连带杀掉。",
+                        "管理器立刻打不开，只能靠那个文件夹恢复。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -208,22 +261,58 @@ fun HideScreen() {
         Spacer(Modifier.height(18.dp))
 
         OutlinedTextField(
-            value = folder,
-            onValueChange = { raw -> folder = normalizePath(raw) },
-            label = { Text("监听路径") },
-            placeholder = { Text("/sdcard/rue 或 /data/local/tmp/rue") },
-            supportingText = {
-                Text(
-                    "实际监听：${resolvePath(folder)}" +
-                        if (folder.startsWith("/")) "（绝对路径原样使用）"
-                        else "（只填名字时挂在 /sdcard 下）",
-                )
+            value = dir,
+            onValueChange = { dir = normalizeDir(it) },
+            label = { Text("监听目录") },
+            placeholder = { Text("/sdcard 或 /storage/XXXX-XXXX/backup") },
+            singleLine = true,
+            enabled = !busy,
+            shape = RoundedCornerShape(14.dp),
+            trailingIcon = {
+                TextButton(onClick = { browsing = true }, enabled = !busy) {
+                    Text("浏览")
+                }
             },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = normalizeName(it) },
+            label = { Text("文件夹名") },
+            placeholder = { Text("rue") },
+            supportingText = { Text("在这个目录下建同名文件夹就会触发恢复") },
             singleLine = true,
             enabled = !busy,
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth(),
         )
+
+        Spacer(Modifier.height(8.dp))
+
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text(
+                    "触发路径",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    triggerPath(dir, name).ifBlank { "（未填写）" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -249,11 +338,11 @@ fun HideScreen() {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("启用隐藏与监听", style = MaterialTheme.typography.bodyLarge)
+                    Text("开始隐藏", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         when {
                             busy -> "处理中…"
-                            enabled && !installed -> "已移除 · 守护进程 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
+                            enabled && !installed -> "已移除 · 守护 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
                             enabled && hidden -> "已隐藏（可见性受限）· 守护 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
                             enabled -> "监听已配置，管理器当前可见"
                             else -> "未启用"
@@ -287,8 +376,8 @@ fun HideScreen() {
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "恢复方法：创建「${resolvePath(folder)}」，几秒内会自动解除隐藏、" +
-                "静默装回并打开 rue，随后隐藏自动关闭（开关回到未启用状态）。",
+            "恢复方法：在「$dir」下新建文件夹「$name」，几秒内自动解除隐藏、静默装回并打开 rue，" +
+                "随后隐藏自动关闭。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -296,7 +385,76 @@ fun HideScreen() {
     }
 }
 
-private fun buildEnableScript(context: Context, folder: String): String {
+@Composable
+private fun DirPickerDialog(
+    startPath: String,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    val ksuCli: KsuCliRepository = koinInject()
+    var current by remember { mutableStateOf(startPath) }
+    var entries by remember { mutableStateOf(listOf<String>()) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(current) {
+        loading = true
+        entries = withContext(Dispatchers.IO) { listDirs(ksuCli, current) }
+        loading = false
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                current,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            Column(Modifier.height(360.dp)) {
+                LazyColumn(Modifier.weight(1f)) {
+                    item {
+                        TextButton(
+                            onClick = { current = parentOf(current) },
+                            enabled = current != "/",
+                        ) {
+                            Text(".. 上一级")
+                        }
+                    }
+                    items(entries) { child ->
+                        TextButton(
+                            onClick = {
+                                current = if (current == "/") "/$child" else "$current/$child"
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(child, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    if (!loading && entries.isEmpty()) {
+                        item {
+                            Text(
+                                "（这个目录下没有子文件夹）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onPick(current) }) { Text("选择此目录") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+private fun buildEnableScript(context: Context, trigger: String): String {
     val watchB64 = assetBase64(context, "watch.sh")
     val supB64 = assetBase64(context, "supervisor.sh")
     val bootB64 = assetBase64(context, "boot.sh")
@@ -304,7 +462,7 @@ private fun buildEnableScript(context: Context, folder: String): String {
         append("mkdir -p $ROOT_DIR /data/adb/service.d\n")
         append("APKSRC=\$(pm path $PKG | head -1 | sed 's/package://')\n")
         append("if [ -n \"\$APKSRC\" ]; then cp -f \"\$APKSRC\" $APK; chmod 644 $APK; fi\n")
-        append("echo '$folder' > $CONF\n")
+        append("echo '$trigger' > $CONF\n")
         append("echo '$watchB64' | base64 -d > $WATCH\n")
         append("echo '$supB64' | base64 -d > $SUP\n")
         append("echo '$bootB64' | base64 -d > $BOOT\n")

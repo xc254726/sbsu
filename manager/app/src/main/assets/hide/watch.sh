@@ -10,19 +10,42 @@ LOG=/data/adb/rue/watch.log
 DIRNAME=$(cat "$CONF" 2>/dev/null)
 [ -n "$DIRNAME" ] || exit 0
 
+# 关键：把自身迁到根 cgroup。否则守护进程仍挂在管理器 cgroup 下，
+# 管理器一旦被卸载/强停，系统清理时会把它一起收走，文件夹就再没人监听。
+echo $$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
+
 echo $$ > /data/adb/rue/watch.pid
-echo "[$(date '+%F %T')] watcher start dir=$DIRNAME" >> "$LOG"
+
+log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
+visible() { pm list packages 2>/dev/null | grep -q "package:$PKG"; }
+
+log "watcher start dir=$DIRNAME pid=$$"
+
+restore() {
+  log "trigger folder=$DIRNAME"
+  pm unhide "$PKG" >> "$LOG" 2>&1
+  pm install-existing --user 0 "$PKG" >> "$LOG" 2>&1
+  if ! visible; then
+    if [ -s "$APK" ]; then
+      pm install -r "$APK" >> "$LOG" 2>&1
+    else
+      log "no apk backup at $APK"
+    fi
+  fi
+  if visible; then
+    log "restored"
+    am force-stop com.android.settings >/dev/null 2>&1
+    am start -n "$PKG/$ACT" >> "$LOG" 2>&1
+    sleep 15
+  else
+    log "restore failed, retry in 10s"
+    sleep 10
+  fi
+}
 
 while :; do
   if [ -e "/sdcard/$DIRNAME" ] || [ -e "/storage/emulated/0/$DIRNAME" ]; then
-    echo "[$(date '+%F %T')] trigger folder=$DIRNAME" >> "$LOG"
-    pm unhide "$PKG" >> "$LOG" 2>&1
-    if ! pm list packages 2>/dev/null | grep -q "package:$PKG"; then
-      pm install -r "$APK" >> "$LOG" 2>&1
-    fi
-    am force-stop com.android.settings >/dev/null 2>&1
-    am start -n "$PKG/$ACT" >> "$LOG" 2>&1
-    sleep 20
+    restore
   fi
   sleep 3
 done

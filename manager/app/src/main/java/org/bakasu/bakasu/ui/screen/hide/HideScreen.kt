@@ -46,6 +46,7 @@ private const val PKG = "com.rue.manager"
 private const val ROOT_DIR = "/data/adb/rue"
 private const val CONF = "$ROOT_DIR/watch.conf"
 private const val WATCH = "$ROOT_DIR/watch.sh"
+private const val SUP = "$ROOT_DIR/supervisor.sh"
 private const val BOOT = "/data/adb/service.d/rue-watch.sh"
 private const val APK = "$ROOT_DIR/rue.apk"
 
@@ -74,6 +75,7 @@ fun HideScreen() {
     var enabled by remember { mutableStateOf(false) }
     var hidden by remember { mutableStateOf(false) }
     var pid by remember { mutableStateOf("") }
+    var installed by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(true) }
     var message by remember { mutableStateOf("") }
 
@@ -87,12 +89,17 @@ fun HideScreen() {
                     ksuCli,
                     "pgrep -f /data/adb/rue/watch.sh | head -1",
                 ).trim()
-                Triple(conf, state.contains("hidden=true"), running)
+                val present = runRootShell(
+                    ksuCli,
+                    "pm list packages | grep -c 'package:$PKG'",
+                ).trim()
+                Triple(conf, state.contains("hidden=true"), running to present)
             }
             if (res.first.isNotBlank()) folder = res.first
             enabled = res.first.isNotBlank()
             hidden = res.second
-            pid = res.third
+            pid = res.third.first
+            installed = res.third.second != "0"
             busy = false
         }
     }
@@ -154,7 +161,8 @@ fun HideScreen() {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "注意：隐藏后管理器界面一旦被系统清掉就打不开了，只能靠文件夹恢复。",
+                    "注意：开启后 APK 会从系统里移除（已备份到 /data/adb/rue/rue.apk），" +
+                        "管理器立刻打不开，只能靠文件夹恢复；守护进程已迁出管理器 cgroup，不会被连带杀掉。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -192,7 +200,8 @@ fun HideScreen() {
                     Text(
                         when {
                             busy -> "处理中…"
-                            enabled && hidden -> "隐藏中 · 守护进程 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
+                            enabled && !installed -> "已移除 · 守护进程 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
+                            enabled && hidden -> "已隐藏（可见性受限）· 守护 ${if (pid.isBlank()) "未运行" else "PID $pid"}"
                             enabled -> "监听已配置，管理器当前可见"
                             else -> "未启用"
                         },
@@ -235,6 +244,7 @@ fun HideScreen() {
 
 private fun buildEnableScript(context: Context, folder: String): String {
     val watchB64 = assetBase64(context, "watch.sh")
+    val supB64 = assetBase64(context, "supervisor.sh")
     val bootB64 = assetBase64(context, "boot.sh")
     return buildString {
         append("mkdir -p $ROOT_DIR /data/adb/service.d\n")
@@ -242,21 +252,30 @@ private fun buildEnableScript(context: Context, folder: String): String {
         append("if [ -n \"\$APKSRC\" ]; then cp -f \"\$APKSRC\" $APK; chmod 644 $APK; fi\n")
         append("echo '$folder' > $CONF\n")
         append("echo '$watchB64' | base64 -d > $WATCH\n")
-        append("chmod 755 $WATCH\n")
+        append("echo '$supB64' | base64 -d > $SUP\n")
         append("echo '$bootB64' | base64 -d > $BOOT\n")
-        append("chmod 755 $BOOT\n")
+        append("chmod 755 $WATCH $SUP $BOOT\n")
+        append("pgrep -f /data/adb/rue/supervisor.sh | while read p; do kill -9 \$p 2>/dev/null; done\n")
         append("pgrep -f /data/adb/rue/watch.sh | while read p; do kill -9 \$p 2>/dev/null; done\n")
-        append("setsid $WATCH >/dev/null 2>&1 &\n")
-        append("sleep 1\n")
-        append("pm hide $PKG\n")
+        append("setsid $SUP >/dev/null 2>&1 &\n")
+        append("sleep 2\n")
+        append("if [ -s $APK ]; then\n")
+        append("  pm uninstall -k --user 0 $PKG >/dev/null 2>&1\n")
+        append("  echo ENABLED\n")
+        append("else\n")
+        append("  echo 'no backup apk, fallback to pm hide'\n")
+        append("  pm hide $PKG\n")
+        append("  echo ENABLED_HIDE_ONLY\n")
+        append("fi\n")
         append("am force-stop com.android.settings >/dev/null 2>&1\n")
-        append("echo ENABLED\n")
     }
 }
 
 private fun buildDisableScript(): String = buildString {
+    append("pgrep -f /data/adb/rue/supervisor.sh | while read p; do kill -9 \$p 2>/dev/null; done\n")
     append("pgrep -f /data/adb/rue/watch.sh | while read p; do kill -9 \$p 2>/dev/null; done\n")
     append("rm -f $BOOT $CONF\n")
+    append("pm install-existing --user 0 $PKG >/dev/null 2>&1\n")
     append("pm unhide $PKG\n")
     append("am force-stop com.android.settings >/dev/null 2>&1\n")
     append("echo DISABLED\n")

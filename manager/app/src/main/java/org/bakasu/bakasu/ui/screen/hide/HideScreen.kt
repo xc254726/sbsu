@@ -234,7 +234,8 @@ fun HideScreen() {
 
         Spacer(Modifier.height(20.dp))
         Text(
-            "恢复方法：在内部存储根目录新建文件夹「$folder」，几秒后 rue 会自动出现在桌面并打开。",
+            "恢复方法：在内部存储根目录新建文件夹「$folder」，几秒内会自动解除隐藏、静默装回并打开 rue，" +
+                "随后隐藏自动关闭（开关回到未启用状态）。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

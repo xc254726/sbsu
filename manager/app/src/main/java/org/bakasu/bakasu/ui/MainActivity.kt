@@ -389,7 +389,7 @@ private fun ActivationScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "rue",
+                text = "chen",
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Medium,
                 color = ink,

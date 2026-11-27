@@ -1,5 +1,7 @@
 package org.bakasu.bakasu.ui
 
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -12,6 +14,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +53,9 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -60,6 +67,7 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -158,14 +166,20 @@ class MainActivity : ComponentActivity() {
                         else -> {
                             val ctx = this@MainActivity
                             var gate by remember { mutableStateOf(GateState.CHECKING) }
+                            var startKey by remember { mutableStateOf("") }
+                            var startPayUrl by remember { mutableStateOf<String?>(null) }
 
                             LaunchedEffect(Unit) {
-                                gate = if (License.hasKey(ctx)) {
-                                    val r = License.verify(ctx)
-                                    if (r == VerifyResult.VALID || r == VerifyResult.NETWORK_ERROR) {
-                                        GateState.OK
-                                    } else {
-                                        GateState.NEED_ACTIVATION
+                                val stored = License.storedKey(ctx).orEmpty()
+                                startKey = stored
+                                gate = if (stored.isNotBlank()) {
+                                    when (val r = License.verifyKey(ctx, stored)) {
+                                        is VerifyResult.Valid, is VerifyResult.NetworkError -> GateState.OK
+                                        is VerifyResult.NeedPay -> {
+                                            startPayUrl = r.url
+                                            GateState.NEED_ACTIVATION
+                                        }
+                                        else -> GateState.NEED_ACTIVATION
                                     }
                                 } else {
                                     GateState.NEED_ACTIVATION
@@ -176,9 +190,12 @@ class MainActivity : ComponentActivity() {
                                 GateState.OK -> NavContainer(settingsViewModel, intentChannel)
                                 GateState.CHECKING -> LoadingScreen()
                                 GateState.NEED_ACTIVATION -> ActivationScreen(
+                                    initialKey = startKey,
+                                    initialPayUrl = startPayUrl,
                                     onActivate = { input, remember ->
                                         License.activate(ctx, input, remember)
                                     },
+                                    onPoll = { k -> License.verifyKey(ctx, k) },
                                     onDone = { gate = GateState.OK },
                                 )
                             }
@@ -252,7 +269,18 @@ private fun StartupFailureContent(reason: String) {
 
 enum class GateState { CHECKING, OK, NEED_ACTIVATION }
 
-enum class VerifyResult { VALID, INVALID, NETWORK_ERROR }
+sealed class VerifyResult {
+    object Valid : VerifyResult()
+    object Invalid : VerifyResult()
+    object NetworkError : VerifyResult()
+    data class NeedPay(val msg: String, val url: String) : VerifyResult()
+}
+
+sealed class ActivateResult {
+    object Ok : ActivateResult()
+    data class Fail(val msg: String) : ActivateResult()
+    data class NeedPay(val msg: String, val url: String) : ActivateResult()
+}
 
 /**
  * 在线卡密校验
@@ -260,6 +288,9 @@ enum class VerifyResult { VALID, INVALID, NETWORK_ERROR }
  * 服务端：https://sbkey.dpdns.org (Cloudflare Worker + KV)
  *    POST /activate {key, device}
  *    POST /verify   {key, device}
+ *
+ * 卡密到期（欠费）时服务端返回 code=402 / need_pay=true + pay_url，
+ * 客户端据此弹出收款码，付款到账后自动续期。
  */
 object License {
     private const val BASE_URL = "https://sbkey.dpdns.org"
@@ -287,6 +318,19 @@ object License {
 
     fun hasKey(context: Context): Boolean = !storedKey(context).isNullOrBlank()
 
+    private fun saveKey(context: Context, key: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY, key).apply()
+    }
+
+    fun payUrl(key: String): String =
+        "$BASE_URL/pay?k=" + java.net.URLEncoder.encode(key, "UTF-8")
+
+    /** 与后台 norm() 对齐：全角转半角，保留中文/字母/数字/横线/下划线，区分大小写 */
+    fun normalize(input: String): String =
+        java.text.Normalizer.normalize(input.trim(), java.text.Normalizer.Form.NFKC)
+            .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+
     private fun post(path: String, body: JSONObject): JSONObject? = try {
         val conn = URL(BASE_URL + path).openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
@@ -304,40 +348,53 @@ object License {
         null
     }
 
-    suspend fun activate(context: Context, input: String, remember: Boolean): String? =
+    private fun needsPay(resp: JSONObject): Boolean =
+        resp.optBoolean("need_pay") || resp.optInt("code", 0) == 402 || resp.optInt("code", 0) == 426
+
+    suspend fun activate(context: Context, input: String, remember: Boolean): ActivateResult =
         withContext(Dispatchers.IO) {
-            // 与后台 norm() 对齐：全角转半角，保留中文/字母/数字/横线/下划线，且区分大小写
-            val key = java.text.Normalizer.normalize(input.trim(), java.text.Normalizer.Form.NFKC)
-                .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
-            if (key.length < 2 || key.length > 40) return@withContext "卡密格式不对"
+            val key = normalize(input)
+            if (key.length < 2 || key.length > 40) return@withContext ActivateResult.Fail("卡密格式不对")
 
             val body = JSONObject().apply {
                 put("key", key)
                 put("device", deviceCode(context))
             }
-            val resp = post("/activate", body) ?: return@withContext "网络连接失败，请检查网络"
+            val resp = post("/activate", body) ?: return@withContext ActivateResult.Fail("网络连接失败，请检查网络")
 
-            if (resp.optBoolean("ok")) {
-                if (remember) {
-                    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                        .edit().putString(KEY, key).apply()
+            when {
+                resp.optBoolean("ok") -> {
+                    if (remember) saveKey(context, key)
+                    ActivateResult.Ok
                 }
-                null
-            } else {
-                resp.optString("err", "激活失败")
+                needsPay(resp) -> ActivateResult.NeedPay(
+                    resp.optString("err", "卡密已欠费，请续卡密"),
+                    resp.optString("pay_url").ifBlank { payUrl(key) },
+                )
+                else -> ActivateResult.Fail(resp.optString("err", "激活失败"))
             }
         }
 
-    suspend fun verify(context: Context): VerifyResult = withContext(Dispatchers.IO) {
-        val key = storedKey(context) ?: return@withContext VerifyResult.INVALID
+    suspend fun verifyKey(context: Context, rawKey: String): VerifyResult = withContext(Dispatchers.IO) {
+        val key = normalize(rawKey)
+        if (key.isBlank()) return@withContext VerifyResult.Invalid
         val body = JSONObject().apply {
             put("key", key)
             put("device", deviceCode(context))
         }
-        val resp = post("/verify", body) ?: return@withContext VerifyResult.NETWORK_ERROR
-        if (resp.optBoolean("ok")) VerifyResult.VALID else VerifyResult.INVALID
+        val resp = post("/verify", body) ?: return@withContext VerifyResult.NetworkError
+        when {
+            resp.optBoolean("ok") -> VerifyResult.Valid
+            needsPay(resp) -> VerifyResult.NeedPay(
+                resp.optString("err", "卡密已欠费，请续卡密"),
+                resp.optString("pay_url").ifBlank { payUrl(key) },
+            )
+            else -> VerifyResult.Invalid
+        }
     }
 
+    suspend fun verify(context: Context): VerifyResult =
+        verifyKey(context, storedKey(context).orEmpty())
 }
 
 @Composable
@@ -357,16 +414,51 @@ private fun LoadingScreen() {
 
 @Composable
 private fun ActivationScreen(
-    onActivate: suspend (String, Boolean) -> String?,
+    initialKey: String,
+    initialPayUrl: String?,
+    onActivate: suspend (String, Boolean) -> ActivateResult,
+    onPoll: suspend (String) -> VerifyResult,
     onDone: () -> Unit,
 ) {
-    var input by remember { mutableStateOf("") }
+    var input by remember { mutableStateOf(initialKey) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var rememberKey by remember { mutableStateOf(true) }
+    var payUrl by remember { mutableStateOf(initialPayUrl) }
+    var showPay by remember { mutableStateOf(!initialPayUrl.isNullOrBlank()) }
+
+    LaunchedEffect(initialPayUrl) {
+        if (!initialPayUrl.isNullOrBlank()) {
+            payUrl = initialPayUrl
+            showPay = true
+        }
+    }
 
     val ink = Color(0xFF1F1F1F)
     val grey = Color(0xFF8A8A8F)
+
+    fun submit() {
+        busy = true
+        error = null
+        MainScope().launch {
+            when (val r = onActivate(input, rememberKey)) {
+                is ActivateResult.Ok -> {
+                    busy = false
+                    onDone()
+                }
+                is ActivateResult.NeedPay -> {
+                    busy = false
+                    error = r.msg
+                    payUrl = r.url
+                    showPay = true
+                }
+                is ActivateResult.Fail -> {
+                    busy = false
+                    error = r.msg
+                }
+            }
+        }
+    }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFFF7F7F8)) {
         Column(
@@ -443,6 +535,16 @@ private fun ActivationScreen(
                     )
                 }
 
+                if (!payUrl.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    TextButton(
+                        onClick = { showPay = true },
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text("打开收款码", fontSize = 12.5.sp, color = Color(0xFF5B4BD6))
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Row(
@@ -461,15 +563,7 @@ private fun ActivationScreen(
 
                 Button(
                     enabled = !busy,
-                    onClick = {
-                        busy = true
-                        error = null
-                        MainScope().launch {
-                            val err = onActivate(input, rememberKey)
-                            busy = false
-                            if (err == null) onDone() else error = err
-                        }
-                    },
+                    onClick = { submit() },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),
@@ -494,6 +588,109 @@ private fun ActivationScreen(
                 color = Color(0xFFAFAFB6),
                 textAlign = TextAlign.Center,
             )
+        }
+    }
+
+    val target = payUrl
+    if (showPay && !target.isNullOrBlank()) {
+        PayDialog(
+            url = target,
+            key = License.normalize(input),
+            onPoll = onPoll,
+            onPaid = {
+                showPay = false
+                submit()
+            },
+            onClose = { showPay = false },
+        )
+    }
+}
+
+/**
+ * 欠费收款弹窗：内嵌服务端支付页（二维码），后台每 3 秒查一次支付状态，
+ * 到账后自动关闭并重新验证，卡密恢复使用。
+ */
+@Composable
+private fun PayDialog(
+    url: String,
+    key: String,
+    onPoll: suspend (String) -> VerifyResult,
+    onPaid: () -> Unit,
+    onClose: () -> Unit,
+) {
+    var status by remember { mutableStateOf("扫码支付，到账后自动生效") }
+    var ok by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .height(600.dp),
+            shape = RoundedCornerShape(22.dp),
+            color = Color.White,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 18.dp, end = 6.dp, top = 12.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "卡密续费",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF1F1F1F),
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onClose) {
+                        Text("关闭", fontSize = 13.sp, color = Color(0xFF8A8A8F))
+                    }
+                }
+
+                Text(
+                    text = status,
+                    fontSize = 12.sp,
+                    color = if (ok) Color(0xFF1A7F4B) else Color(0xFF8A8A8F),
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                AndroidView(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.useWideViewPort = true
+                            settings.loadWithOverviewMode = true
+                            webViewClient = WebViewClient()
+                            loadUrl(url)
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(url) {
+        var tries = 0
+        while (tries < 200) {
+            delay(3000)
+            tries++
+            if (onPoll(key) is VerifyResult.Valid) {
+                ok = true
+                status = "支付成功，卡密已恢复使用"
+                delay(800)
+                onPaid()
+                return@LaunchedEffect
+            }
         }
     }
 }
